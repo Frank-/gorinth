@@ -1,0 +1,17 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+gorinth
+
+# Test binaries
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Local temp folders for downloading mods
+temp/
