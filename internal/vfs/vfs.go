@@ -15,4 +15,10 @@ type FileSystem interface {
 
 	// WriteMod writes a new mod file to the mods directory
 	WriteMod(filename string, data io.Reader) error
+
+	// Rename renames a mod file in the mods directory
+	Rename(oldName, newName string) error
+
+	// Backup creates a backup of the current mods directory
+	Backup() (string, error)
 }
