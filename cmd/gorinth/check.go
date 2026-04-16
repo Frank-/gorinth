@@ -2,76 +2,183 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
+	"context"
+
+	"github.com/Frank-/gorinth/internal/modrinth"
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
-	var checkCmd = &cobra.Command{
-		Use:   "check",
-		Short: "Check for updates to your Minecraft server mods without applying them.",
-		Long:  `The check command allows you to see if there are any updates available for your Minecraft server mods without actually downloading or applying them. This is useful for planning updates and ensuring compatibility before making changes to your server.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			tui.Logger.Infof("Starting Gorinth in %s mode", AppConfig.Mode)
+var checkCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Check for updates to your Minecraft server mods without applying them.",
+	Long:  `The check command allows you to see if there are any updates available for your Minecraft server mods without actually downloading or applying them. This is useful for planning updates and ensuring compatibility before making changes to your server.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		tui.Logger.Infof("Starting Gorinth in %s mode", AppConfig.Mode)
 
-			var fs vfs.FileSystem
-			var err error
+		var fs vfs.FileSystem
+		var err error
 
+		// Initialize the appropriate file system based on the mode
+		spinner, _ := tui.StartSpinner(fmt.Sprintf("Connecting to %s...", AppConfig.Mode))
 
-			// Initialize the appropriate file system based on the mode
-			spinner, _ := tui.StartSpinner(fmt.Sprintf("Connecting to %s...", AppConfig.Mode))
+		switch AppConfig.Mode {
+		case "local":
+			fs, err = vfs.NewLocalFS(AppConfig.Dir)
+		case "sftp":
+			fs, err = vfs.NewSFTPFS(AppConfig.SFTPHost, AppConfig.SFTPPort, AppConfig.SFTPUser, AppConfig.SFTPPassword, AppConfig.Dir)
+		default:
+			tui.Logger.Fatal("Invalid mode specified", "mode", AppConfig.Mode)
+		}
 
-			if AppConfig.Mode == "local" {
-				fs, err = vfs.NewLocalFS(AppConfig.Dir)
-			} else if AppConfig.Mode == "sftp" {
-				fs, err = vfs.NewSFTPFS(AppConfig.SFTPHost, AppConfig.SFTPPort, AppConfig.SFTPUser, AppConfig.SFTPPassword, AppConfig.Dir)
-			}
+		if err != nil {
+			spinner.Fail("Failed to connect")
+			tui.Logger.Fatal("Initialization error", "error", err)
+		}
 
+		// Success
+		spinner.Success("Connected successfully!")
+
+		defer fs.Close()
+
+		// Start a spinner while we hash the mods
+		spinner, _ = tui.StartSpinner("Scanning mods directory..")
+		mods, err := fs.ListMods()
+		if err != nil {
+			spinner.Fail("Failed to list mods")
+			tui.Logger.Fatal("Error listing mods", "error", err)
+		}
+		spinner.Success(fmt.Sprintf("Found %d .jar files", len(mods)))
+
+		spinner, _ = tui.StartSpinner("Computing SHA-1 hashes...")
+
+		// Store hashes in a map for later use
+		// hashes := make(map[string]string)
+		hashList := make([]string, 0, len(mods))
+		filenameMap := make(map[string]string)
+		filenameMapReversed := make(map[string]string)
+
+		for _, mod := range mods {
+			hash, err := fs.HashMod(mod)
 			if err != nil {
-				spinner.Fail("Failed to connect")
-				tui.Logger.Fatal("Initialization error", "error", err)
+				spinner.Fail(fmt.Sprintf("Failed to hash mod: %s", mod))
+				tui.Logger.Error("Error hashing mod", "mod", mod, "error", err)
+				continue
+			}
+			hashList = append(hashList, hash)
+			filenameMap[hash] = mod
+			filenameMapReversed[mod] = hash
+		}
+
+		// Success
+		spinner.Success(fmt.Sprintf("Hashed %d mods", len(hashList)))
+
+		// Temporary debug output to verify it worked:
+		for hash, mod := range filenameMap {
+			tui.Logger.Debug("Hashed file", "mod", mod, "sha1", hash)
+		}
+
+		// tui.Logger.Info(fmt.Sprintf("Computed hashes for %d mods", len(hashes)))
+		tui.Logger.Info("Ready to query Modrinth API", "mc_version", AppConfig.GameVersion)
+
+		spinner, _ = tui.StartSpinner("Querying Modrinth API...")
+		client := modrinth.NewClient("Frank-", "gorinth", "0.1.0")
+
+		currentVersions, err := client.CheckVersionsFromHashes(context.Background(), hashList)
+
+		if err != nil {
+			spinner.Fail("Failed to check current versions")
+			tui.Logger.Fatal("Error checking for current versions", "error", err)
+		}
+		updates, err := client.CheckForUpdates(context.Background(), hashList, AppConfig.GameVersion, AppConfig.Loader)
+
+		if err != nil {
+			spinner.Fail("Failed to check for updates")
+			tui.Logger.Fatal("Error checking for updates", "error", err)
+		}
+
+		spinner.Success("API Check complete")
+
+		tableData := pterm.TableData{
+			{"Status", "Mod", "Current Ver", "New Ver", "Compatibility"},
+		}
+
+		sort.Strings(mods)
+
+		for _, filename := range mods {
+			h := filenameMapReversed[filename]
+
+			current, isKnown := currentVersions[h]
+			update, hasUpdate := updates[h]
+
+			status := pterm.LightCyan("Up to date")
+			currentVer := "-"
+			newVer := "-"
+			compatibility := pterm.LightGreen("Compatible")
+
+			if isKnown {
+				currentVer = current.VersionNumber
 			}
 
-			// Success
-			spinner.Success("Connected successfully!")
+			// Check if mod supports target mc version
+			supportsTarget := false
+			if isKnown {
+				for _, gv := range current.GameVersions {
+					if gv == AppConfig.GameVersion {
+						supportsTarget = true
+						break
+					}
 
-			defer fs.Close()
-
-			// Start a spinner while we hash the mods
-			spinner, _ = tui.StartSpinner("Scanning mods directory..")
-			mods, err := fs.ListMods()
-			if err != nil {
-				spinner.Fail("Failed to list mods")
-				tui.Logger.Fatal("Error listing mods", "error", err)
-			}
-			spinner.Success(fmt.Sprintf("Found %d .jar files", len(mods)))
-
-			spinner, _ = tui.StartSpinner("Computing SHA-1 hashes...")
-
-			// Store hashes in a map for later use
-			hashes := make(map[string]string)
-			for _, mod := range mods {
-				hash, err := fs.HashMod(mod)
-				if err != nil {
-					spinner.Fail(fmt.Sprintf("Failed to hash mod: %s", mod))
-					tui.Logger.Error("Error hashing mod", "mod", mod, "error", err)
-					continue
 				}
-				hashes[mod] = hash
+
+				if !supportsTarget && isKnown {
+					status = pterm.LightRed("Incompatible")
+					compatibility = pterm.LightRed("Needs update")
+				}
+
+				if hasUpdate {
+					status = pterm.LightYellow("Update available")
+					newVer = pterm.Bold.Sprint(update.VersionNumber)
+					compatibility = pterm.LightGreen("Available")
+				}
+
+				// // Find the corresponding hash for this filename
+				// var currentHash string
+				// for hash, f := range filenameMap {
+				// 	if f == filename {
+				// 		currentHash = hash
+				// 		break
+				// 	}
+				// }
+
+				// // Check if there's an update for this hash
+				// update, found := updates[currentHash]
+
+				// if !found {
+				// 	// No update found, either mod is on latest version or not recognized by Modrinth
+				// 	tableData = append(tableData, []string{ "Up to date", filename, "-", "-", "-" })
+				// } else {
+				// 	// Update found, show new version info
+				// 	newFilename := update.Files[0].Filename
+				// 	for _, f := range update.Files {
+				// 		if f.Primary {
+				// 			newFilename = f.Filename
+				// 			break
+				// 		}
+				// 	}
+				tableData = append(tableData, []string{status, filename, currentVer, newVer, compatibility})
 			}
 
-			// Success
-			spinner.Success(fmt.Sprintf("Computed hashes for %d mods", len(hashes)))
+		}
 
+		err = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+		if err != nil {
+			tui.Logger.Error("Error rendering table", "error", err)
+		}
 
-			// Temporary debug output to verify it worked:
-			for mod, hash := range hashes {
-				tui.Logger.Debug("Hashed file", "mod", mod, "sha1", hash)
-			}
-
-			tui.Logger.Info(fmt.Sprintf("Computed hashes for %d mods", len(hashes)))
-			tui.Logger.Info("Ready to query Modrinth API", "mc_version", AppConfig.MCVersion)
-			
-		},
-	}
+	},
+}
