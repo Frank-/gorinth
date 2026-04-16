@@ -34,7 +34,7 @@ func NewSFTPFS(host string, port int, user, pass, dir string) (*SFTPFS, error) {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	sshClient, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to SSH server: %w @ %s", err, addr)
+		return nil, fmt.Errorf("failed to connect to SSH server: %w", err)
 	}
 
 	sftpClient, err := sftp.NewClient(sshClient)

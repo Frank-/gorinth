@@ -5,7 +5,7 @@
 *.so
 *.dylib
 bin/
-gorinth
+/gorinth
 
 # Test binaries
 *.test
