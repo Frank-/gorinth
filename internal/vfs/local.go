@@ -137,3 +137,8 @@ func (fs *LocalFS) Backup() (string, error) {
 
 	return backupPath, nil
 }
+
+func (fs *LocalFS) Close() error {
+	// No resources to release for local file system
+	return nil
+}

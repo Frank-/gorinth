@@ -21,4 +21,7 @@ type FileSystem interface {
 
 	// Backup creates a backup of the current mods directory
 	Backup() (string, error)
+
+	// Close closes the file system and releases any resources
+	Close() error
 }

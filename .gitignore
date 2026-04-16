@@ -15,3 +15,11 @@ gorinth
 
 # Local temp folders for downloading mods
 temp/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# config
+config.yaml

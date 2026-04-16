@@ -18,6 +18,7 @@ func init() {
 		ReportTimestamp: true,
 		TimeFormat: time.TimeOnly,
 		Prefix: "gorinth",
+		Level: log.InfoLevel,
 	})
 }
 
@@ -27,4 +28,8 @@ func StartSpinner(text string) (*pterm.SpinnerPrinter, error) {
 									WithText(text).
 									Start()
 	return spinner, err
+}
+
+func SetDebugMode() {
+	Logger.SetLevel(log.DebugLevel)
 }
