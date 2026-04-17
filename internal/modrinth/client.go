@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -14,6 +15,7 @@ const (
 	baseAPI          = "https://api.modrinth.com/v2"
 	updateURL        = baseAPI + "/version_files/update"
 	versionsFilesURL = baseAPI + "/version_files"
+	projectsURL      = baseAPI + "/projects?ids=%s"
 )
 
 type UpdateRequest struct {
@@ -135,4 +137,29 @@ func (c *Client) CheckVersionsFromHashes(ctx context.Context, hashes []string) (
 
 	return result, err
 
+}
+
+func (c *Client) GetProjects(projectIDs []string) (map[string]ModrinthProject, error) {
+	if len(projectIDs) == 0 {
+		return nil, nil
+	}
+
+	idBytes, _ := json.Marshal(projectIDs)
+	query := url.QueryEscape(string(idBytes))
+	reqUrl := fmt.Sprintf(projectsURL, query)
+
+	var result []ModrinthProject
+	err := c.do(context.Background(), "GET", reqUrl, nil, &result)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map for easy lookup
+	projectMap := make(map[string]ModrinthProject)
+	for _, project := range result {
+		projectMap[project.ID] = project
+	}
+
+	return projectMap, nil
 }

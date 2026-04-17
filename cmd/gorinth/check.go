@@ -77,12 +77,11 @@ var checkCmd = &cobra.Command{
 		// Success
 		spinner.Success(fmt.Sprintf("Hashed %d mods", len(hashList)))
 
-		// Temporary debug output to verify it worked:
+		// Debug output to verify it worked:
 		for hash, mod := range filenameMap {
 			tui.Logger.Debug("Hashed file", "mod", mod, "sha1", hash)
 		}
 
-		// tui.Logger.Info(fmt.Sprintf("Computed hashes for %d mods", len(hashes)))
 		tui.Logger.Info("Ready to query Modrinth API", "mc_version", AppConfig.GameVersion)
 
 		spinner, _ = tui.StartSpinner("Querying Modrinth API...")
@@ -101,6 +100,26 @@ var checkCmd = &cobra.Command{
 			tui.Logger.Fatal("Error checking for updates", "error", err)
 		}
 
+		spinner, _ = tui.StartSpinner("Fetching mod names...")
+		projectIDSet := make(map[string]bool)
+		for _, version := range currentVersions {
+			projectIDSet[version.ProjectID] = true
+		}
+		for _, version := range updates {
+			projectIDSet[version.ProjectID] = true
+		}
+
+		var projectIDs []string
+		for id := range projectIDSet {
+			projectIDs = append(projectIDs, id)
+		}
+
+		projects, err := client.GetProjects(projectIDs)
+		if err != nil {
+			spinner.Fail("Failed to fetch mod names")
+			tui.Logger.Fatal("Error fetching mod names", "error", err)
+		}
+
 		spinner.Success("API Check complete")
 
 		tableData := pterm.TableData{
@@ -115,6 +134,8 @@ var checkCmd = &cobra.Command{
 			current, isKnown := currentVersions[h]
 			update, hasUpdate := updates[h]
 
+			displayName := filename
+
 			status := pterm.LightCyan("Up to date")
 			currentVer := "-"
 			newVer := "-"
@@ -122,6 +143,9 @@ var checkCmd = &cobra.Command{
 
 			if isKnown {
 				currentVer = current.VersionNumber
+				if project, exists := projects[current.ProjectID]; exists {
+					displayName = pterm.Bold.Sprint(project.Title)
+				}
 			}
 
 			// Check if mod supports target mc version
@@ -146,31 +170,7 @@ var checkCmd = &cobra.Command{
 					compatibility = pterm.LightGreen("Available")
 				}
 
-				// // Find the corresponding hash for this filename
-				// var currentHash string
-				// for hash, f := range filenameMap {
-				// 	if f == filename {
-				// 		currentHash = hash
-				// 		break
-				// 	}
-				// }
-
-				// // Check if there's an update for this hash
-				// update, found := updates[currentHash]
-
-				// if !found {
-				// 	// No update found, either mod is on latest version or not recognized by Modrinth
-				// 	tableData = append(tableData, []string{ "Up to date", filename, "-", "-", "-" })
-				// } else {
-				// 	// Update found, show new version info
-				// 	newFilename := update.Files[0].Filename
-				// 	for _, f := range update.Files {
-				// 		if f.Primary {
-				// 			newFilename = f.Filename
-				// 			break
-				// 		}
-				// 	}
-				tableData = append(tableData, []string{status, filename, currentVer, newVer, compatibility})
+				tableData = append(tableData, []string{status, displayName, currentVer, newVer, compatibility})
 			}
 
 		}
