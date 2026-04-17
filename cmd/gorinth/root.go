@@ -20,6 +20,7 @@ type Config struct {
 	Loader       string `mapstructure:"loader"`
 	Dir          string `mapstructure:"dir"`
 	Debug        bool   `mapstructure:"debug"`
+	Force        bool   `mapstructure:"force"`
 	NoTruncate   bool   `mapstructure:"no-truncate"`
 }
 
@@ -101,6 +102,7 @@ func setupFlags() {
 	// Utility
 	flags.Bool("no-truncate", false, "Disable truncation of mod names in the update table for better readability")
 	flags.BoolP("debug", "d", false, "Enable debug logging")
+	flags.Bool("force", false, "Bypass safety checks and force updates. May break everything. Use with caution.")
 
 	// Bind everything
 	viper.BindPFlags(flags)

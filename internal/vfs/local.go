@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
-
 
 type LocalFS struct {
 	BaseDir string
@@ -40,7 +40,7 @@ func (fs *LocalFS) ListMods() ([]string, error) {
 
 	for _, entry := range entries {
 		// We only care about .jar files in the mods directory
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jar"){
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jar") {
 			mods = append(mods, entry.Name())
 		}
 	}
@@ -71,7 +71,7 @@ func (fs *LocalFS) DeleteMod(filename string) error {
 
 func (fs *LocalFS) WriteMod(filename string, data io.Reader) error {
 	path := filepath.Join(fs.BaseDir, filename)
-	
+
 	// Create new file
 	file, err := os.Create(path)
 	if err != nil {
@@ -90,9 +90,32 @@ func (fs *LocalFS) Rename(oldName, newName string) error {
 	return os.Rename(oldPath, newPath)
 }
 
+func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download mod: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download mod: received status code %d", resp.StatusCode)
+	}
+
+	destPath := filepath.Join(fs.BaseDir, targetFilename)
+	file, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create mod file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, resp.Body)
+	return err
+}
+
 func (fs *LocalFS) Backup() (string, error) {
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	backupName := fmt.Sprintf("mods_backup_%s.zip", timestamp)
+	backupName := fmt.Sprintf("%s_backup_%s.zip", fs.BaseDir, timestamp)
+	// backupName := fmt.Sprintf("mods_backup_%s.zip", timestamp)
 
 	parentDir := filepath.Dir(fs.BaseDir)
 	backupPath := filepath.Join(parentDir, backupName)
