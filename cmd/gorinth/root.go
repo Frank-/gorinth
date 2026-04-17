@@ -10,7 +10,6 @@ import (
 )
 
 type Config struct {
-	Debug        bool   `mapstructure:"debug"`
 	Mode         string `mapstructure:"mode"`
 	SFTPHost     string `mapstructure:"sftp-host"`
 	SFTPPort     int    `mapstructure:"sftp-port"`
@@ -19,6 +18,8 @@ type Config struct {
 	GameVersion  string `mapstructure:"game-version"`
 	Loader       string `mapstructure:"loader"`
 	Dir          string `mapstructure:"dir"`
+	Debug        bool   `mapstructure:"debug"`
+	NoTruncate   bool   `mapstructure:"no-truncate"`
 }
 
 var AppConfig Config
@@ -75,7 +76,6 @@ func setupConfig() {
 func setupFlags() {
 	flags := rootCmd.PersistentFlags()
 
-	flags.BoolP("debug", "d", false, "Enable debug logging")
 	// mode
 	flags.String("mode", "sftp", "Mode of operation: `local` or `sftp`")
 	// Connection
@@ -90,6 +90,10 @@ func setupFlags() {
 	// Minecraft version and loader
 	flags.String("game-version", "1.20.4", "Minecraft version to check for updates")
 	flags.String("loader", "fabric", "Mod loader to check for updates (e.g. fabric, forge)")
+
+	// Utility
+	flags.Bool("no-truncate", false, "Disable truncation of mod names in the update table for better readability")
+	flags.BoolP("debug", "d", false, "Enable debug logging")
 
 	// Bind everything
 	viper.BindPFlags(flags)

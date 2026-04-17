@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"context"
 
@@ -12,6 +13,97 @@ import (
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
+
+// Helper function to truncate long mod names for better table display
+func truncateText(text string, maxLength int) string {
+	// If no truncation is desired, return the original text
+	if AppConfig.NoTruncate {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) > maxLength {
+		return string(runes[:maxLength-3]) + "..."
+	}
+	return text
+}
+
+// Helper function to format Minecraft versions for display in the table
+func formatMCVersions(versions []string) string {
+	if len(versions) == 0 {
+		return "-"
+	}
+
+	if len(versions) <= 2 {
+		return strings.Join(versions, ", ")
+	}
+
+	return fmt.Sprintf("%s (+%d)", versions[0], len(versions)-1)
+}
+
+func buildTableHeader() []string {
+	return []string{"Status", "Mod", "Current Mod Ver", "MC (Current)", "New Mod Ver", "MC (New)", "Compatibility"}
+}
+
+func buildTableRow(
+	filename string,
+	currentVerMap map[string]modrinth.Version,
+	updatesMap map[string]modrinth.Version,
+	projectsMap map[string]modrinth.ModrinthProject,
+	hash string,
+	targetVersion string,
+) []string {
+	current, isKNown := currentVerMap[hash]
+	update, hasUpdate := updatesMap[hash]
+
+	displayName := filename
+	status := pterm.LightCyan("Up to date")
+	currentVer := "-"
+	currentMC := "-"
+	newVer := "-"
+	newMC := "-"
+	compatibility := pterm.LightGreen("Compatible")
+
+	if isKNown {
+		currentVer = truncateText(current.VersionNumber, 18)
+		currentMC = formatMCVersions(current.GameVersions)
+		if project, exists := projectsMap[current.ProjectID]; exists {
+			rawTitle := truncateText(project.Title, 35)
+			displayName = pterm.Bold.Sprint(rawTitle)
+		}
+
+		supportsTarget := false
+		for _, gv := range current.GameVersions {
+			if gv == targetVersion {
+				supportsTarget = true
+				break
+			}
+
+		}
+
+		if !supportsTarget && isKNown {
+			status = pterm.LightRed("Incompatible")
+			compatibility = pterm.LightRed("Needs update")
+		}
+
+		if hasUpdate {
+			status = pterm.LightYellow("Update available")
+			rawNewVer := truncateText(update.VersionNumber, 18)
+			newVer = pterm.Bold.Sprint(rawNewVer)
+			newMC = pterm.LightYellow(formatMCVersions(update.GameVersions))
+			compatibility = pterm.LightGreen("Available")
+		}
+
+	}
+
+	if !isKNown {
+		displayName = truncateText(filename, 35)
+		status = pterm.LightRed("Unknown")
+		compatibility = pterm.LightRed("Unknown")
+	}
+
+	return []string{status, displayName, currentVer, currentMC, newVer, newMC, compatibility}
+}
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
@@ -57,7 +149,6 @@ var checkCmd = &cobra.Command{
 		spinner, _ = tui.StartSpinner("Computing SHA-1 hashes...")
 
 		// Store hashes in a map for later use
-		// hashes := make(map[string]string)
 		hashList := make([]string, 0, len(mods))
 		filenameMap := make(map[string]string)
 		filenameMapReversed := make(map[string]string)
@@ -122,55 +213,17 @@ var checkCmd = &cobra.Command{
 
 		spinner.Success("API Check complete")
 
-		tableData := pterm.TableData{
-			{"Status", "Mod", "Current Ver", "New Ver", "Compatibility"},
-		}
+		// Initialise table with header
+		tableData := pterm.TableData{buildTableHeader()}
 
 		sort.Strings(mods)
 
 		for _, filename := range mods {
-			h := filenameMapReversed[filename]
+			hash := filenameMapReversed[filename]
 
-			current, isKnown := currentVersions[h]
-			update, hasUpdate := updates[h]
-
-			displayName := filename
-
-			status := pterm.LightCyan("Up to date")
-			currentVer := "-"
-			newVer := "-"
-			compatibility := pterm.LightGreen("Compatible")
-
-			if isKnown {
-				currentVer = current.VersionNumber
-				if project, exists := projects[current.ProjectID]; exists {
-					displayName = pterm.Bold.Sprint(project.Title)
-				}
-			}
-
-			// Check if mod supports target mc version
-			supportsTarget := false
-			if isKnown {
-				for _, gv := range current.GameVersions {
-					if gv == AppConfig.GameVersion {
-						supportsTarget = true
-						break
-					}
-
-				}
-
-				if !supportsTarget && isKnown {
-					status = pterm.LightRed("Incompatible")
-					compatibility = pterm.LightRed("Needs update")
-				}
-
-				if hasUpdate {
-					status = pterm.LightYellow("Update available")
-					newVer = pterm.Bold.Sprint(update.VersionNumber)
-					compatibility = pterm.LightGreen("Available")
-				}
-
-				tableData = append(tableData, []string{status, displayName, currentVer, newVer, compatibility})
+			if _, known := currentVersions[hash]; known {
+				row := buildTableRow(filename, currentVersions, updates, projects, hash, AppConfig.GameVersion)
+				tableData = append(tableData, row)
 			}
 
 		}
