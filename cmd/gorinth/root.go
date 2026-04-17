@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	ConfigFile   string `mapstructure:"config-file"`
 	Mode         string `mapstructure:"mode"`
 	SFTPHost     string `mapstructure:"sftp-host"`
 	SFTPPort     int    `mapstructure:"sftp-port"`
@@ -30,6 +31,9 @@ var rootCmd = &cobra.Command{
 	Long:  `Gorinth is a command-line tool that helps you keep your Minecraft server mods up to date by fetching the latest versions from Modrinth.`,
 	// Run the PersistentPreRunE function before any command
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Initialise config
+		setupConfig()
+
 		// Unmarshal config into AppConfig struct
 		if err := viper.Unmarshal(&AppConfig); err != nil {
 			return err
@@ -49,17 +53,19 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	setupFlags()
-	setupConfig()
+	// setupConfig()
 
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(updateCmd)
 }
 
 func setupConfig() {
-	// Read from .env file if it exists
-	viper.SetConfigFile("config.yaml")
+	cfgFile := viper.GetString("config-file")
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	}
+
 	viper.SetConfigType("yaml")
-	// viper.AddConfigPath(".")
 
 	// Read from environment variables
 	viper.SetEnvPrefix("GORINTH")
@@ -67,9 +73,9 @@ func setupConfig() {
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Printf("⚠️  Notice: Could not read config file: %v\n", err)
+		tui.Logger.Warn(fmt.Sprintf("Could not read config file: %v", err))
 	} else {
-		fmt.Println("✅ Success: config.yaml file loaded!")
+		tui.Logger.Info(fmt.Sprintf("Success: %s file loaded!", cfgFile))
 	}
 }
 
@@ -78,6 +84,7 @@ func setupFlags() {
 
 	// mode
 	flags.String("mode", "sftp", "Mode of operation: `local` or `sftp`")
+	flags.String("config-file", "config.yaml", "Path to the configuration file")
 	// Connection
 	flags.String("sftp-host", "localhost", "SFTP host for remote server")
 	flags.IntP("sftp-port", "p", 22, "SFTP port for remote server")

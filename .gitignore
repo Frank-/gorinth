@@ -23,3 +23,9 @@ temp/
 
 # config
 config.yaml
+local.config.yaml
+
+# test related
+/mods
+/rmods
+.DS_Store
