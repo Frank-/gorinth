@@ -28,4 +28,6 @@ local.config.yaml
 # test related
 /mods
 /rmods
+
+# OSX
 .DS_Store
