@@ -10,40 +10,53 @@ import (
 	"time"
 )
 
-
 const (
-	baseAPI = "https://api.modrinth.com/v2"
-	updateURL = baseAPI + "/version_files/update"
+	baseAPI          = "https://api.modrinth.com/v2"
+	updateURL        = baseAPI + "/version_files/update"
 	versionsFilesURL = baseAPI + "/version_files"
 )
 
 type UpdateRequest struct {
-	Hashes []string `json:"hashes"`
-	Algorithm string   `json:"algorithm"`
-	Loaders []string   `json:"loaders"`
+	Hashes       []string `json:"hashes"`
+	Algorithm    string   `json:"algorithm"`
+	Loaders      []string `json:"loaders"`
 	GameVersions []string `json:"game_versions"`
+}
+
+type VersionRequest struct {
+	Hashes    []string `json:"hashes"`
+	Algorithm string   `json:"algorithm"`
 }
 
 type ModrinthFile struct {
-	Hashes map[string]string `json:"hashes"`
-	URL string `json:"url"`
-	Filename string `json:"filename"`
-	Primary bool `json:"primary"`
+	Hashes   map[string]string `json:"hashes"`
+	URL      string            `json:"url"`
+	Filename string            `json:"filename"`
+	Primary  bool              `json:"primary"`
+}
+
+type ModrinthProject struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Slug        string   `json:"slug"`
+	GameID      string   `json:"game_id"`
+	Loader      []string `json:"loader"`
 }
 
 type Version struct {
-	ID string `json:"id"`
-	ProjectID string `json:"project_id"`
-	VersionType string `json:"version_type"`
-	VersionNumber string `json:"version_number"`
-	GameVersions []string `json:"game_versions"`
-	Loaders []string `json:"loaders"`
-	Files []ModrinthFile `json:"files"`
+	ID            string         `json:"id"`
+	ProjectID     string         `json:"project_id"`
+	VersionType   string         `json:"version_type"`
+	VersionNumber string         `json:"version_number"`
+	GameVersions  []string       `json:"game_versions"`
+	Loaders       []string       `json:"loaders"`
+	Files         []ModrinthFile `json:"files"`
 }
 
 type Client struct {
 	httpClient *http.Client
-	userAgent string
+	userAgent  string
 }
 
 // Initialise a new Modrinth API client
@@ -55,7 +68,7 @@ func NewClient(githubUser, projectName, version string) *Client {
 	}
 }
 
-func (c *Client) do(ctx context.Context, method string, url string, body interface{}, target interface{})  error {
+func (c *Client) do(ctx context.Context, method string, url string, body interface{}, target interface{}) error {
 	var bodyReader io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -72,7 +85,7 @@ func (c *Client) do(ctx context.Context, method string, url string, body interfa
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
-	
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -89,27 +102,16 @@ func (c *Client) do(ctx context.Context, method string, url string, body interfa
 
 func (c *Client) CheckForUpdates(ctx context.Context, hashes []string, mcVersion, loader string) (map[string]Version, error) {
 	if len(hashes) == 0 {
-		return nil, nil // No mods to check, return empty result
+		return nil, nil
 	}
 
-	// Build the request payload
+	// Build the request
 	reqBody := UpdateRequest{
-		Hashes: hashes,
-		Algorithm: "sha1",
-		Loaders: []string{loader},
+		Hashes:       hashes,
+		Algorithm:    "sha1",
+		Loaders:      []string{loader},
 		GameVersions: []string{mcVersion},
 	}
-
-	// err := c.do(context.Background(), "POST", apiUrl, reqBody, &result)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("API request failed: %w", err)
-	// }
-
-	// defer resp.Body.Close()
-
-	// if resp.StatusCode != http.StatusOK {
-	// 	return nil, fmt.Errorf("unexpected API response status: %s", resp.Status)
-	// }
 
 	var result map[string]Version
 	err := c.do(ctx, "POST", updateURL, reqBody, &result)
@@ -119,31 +121,17 @@ func (c *Client) CheckForUpdates(ctx context.Context, hashes []string, mcVersion
 // GetVersionFromHashes identifies current mods
 func (c *Client) CheckVersionsFromHashes(ctx context.Context, hashes []string) (map[string]Version, error) {
 	if len(hashes) == 0 {
-		return nil, nil // No mods to check, return empty result
+		return nil, nil
 	}
-	
-	// Build the request payload
-	payload := struct {
-		Hashes []string `json:"hashes"`
-		Algorithm string   `json:"algorithm"`
-	}{
-		Hashes: hashes,
+
+	// Build the request
+	reqBody := VersionRequest{
+		Hashes:    hashes,
 		Algorithm: "sha1",
 	}
 
-	// resp, err := c.MakeRequest(payload, "POST", "https://api.modrinth.com/v2/version_files")
-	// if err != nil {
-	// 	return nil, fmt.Errorf("API request failed: %w", err)
-	// }
-
-	// defer resp.Body.Close()
-	
-	// if resp.StatusCode != http.StatusOK {
-	// 	return nil, fmt.Errorf("unexpected API response status: %s", resp.Status)
-	// }
-
 	var result map[string]Version
-	err := c.do(ctx, "POST", versionsFilesURL, payload, &result)
+	err := c.do(ctx, "POST", versionsFilesURL, reqBody, &result)
 
 	return result, err
 
