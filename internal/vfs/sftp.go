@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -158,53 +159,69 @@ func (fs *SFTPFS) DownloadMod(url string, targetFilename string) error {
 	destPath := filepath.ToSlash(filepath.Join(fs.BaseDir, targetFilename))
 
 	if fs.downloadTool == "" {
-		fs.downloadTool = "sftp" // default to sftp fallback
+		// fs.downloadTool = "sftp" // default to sftp fallback
 
-		if session, err := fs.sshClient.NewSession(); err == nil {
-			// check for curl
-			if err := session.Run("command -v curl"); err == nil {
-				fs.downloadTool = "curl"
-			}
-			session.Close()
-		}
+		// if session, err := fs.sshClient.NewSession(); err == nil {
+		// 	// check for curl
+		// 	if err := session.Run("command -v curl"); err == nil {
+		// 		fs.downloadTool = "curl"
+		// 	}
+		// 	session.Close()
+		// }
 
-		if fs.downloadTool == "sftp" {
-			if session, err := fs.sshClient.NewSession(); err == nil {
-				// check for wget
-				if err := session.Run("command -v wget"); err == nil {
-					fs.downloadTool = "wget"
-				}
-				session.Close()
-			}
-		}
+		// if fs.downloadTool == "sftp" {
+		// 	if session, err := fs.sshClient.NewSession(); err == nil {
+		// 		// check for wget
+		// 		if err := session.Run("command -v wget"); err == nil {
+		// 			fs.downloadTool = "wget"
+		// 		}
+		// 		session.Close()
+		// 	}
+		// }
+
+		fs.downloadTool = fs.determineDownloadMethod(fs.sshClient)
 
 		tui.Logger.Debug("Selected download method", "method", fs.downloadTool)
 	}
 
 	// Attempt serverside download
-	if fs.downloadTool == "curl" {
-		if session, err := fs.sshClient.NewSession(); err == nil {
-			cmd := fmt.Sprintf("curl -sL -o '%s' '%s' >/dev/null 2>&1", destPath, url)
-			err = session.Run(cmd)
-			session.Close()
-			if err == nil {
-				return nil // Download succeeded
-			}
+	if fs.downloadTool == "curl" || fs.downloadTool == "wget" {
+		var cmd string
+		if fs.downloadTool == "curl" {
+			cmd = fmt.Sprintf("curl -sL -o '%s' '%s' >/dev/null 2>&1", destPath, url)
+		} else {
+			cmd = fmt.Sprintf("wget -q -O '%s' '%s' >/dev/null 2>&1", destPath, url)
 		}
-	}
 
-	if fs.downloadTool == "wget" {
-		if session, err := fs.sshClient.NewSession(); err == nil {
-			cmd := fmt.Sprintf("wget -q -O '%s' '%s' >/dev/null 2>&1", destPath, url)
-			err = session.Run(cmd)
-			session.Close()
-			if err == nil {
-				return nil // Download succeeded with wget
-			}
+		_, err := runCmdWithTimeout(fs.sshClient, cmd, 60*time.Second)
+		if err == nil {
+			tui.Logger.Debug("Server-side download successful", "url", url, "dest", destPath)
+			return nil
 		}
+		tui.Logger.Warn("Server-side download failed, falling back to local download and upload", "error", err)
+		// 	if session, err := fs.sshClient.NewSession(); err == nil {
+		// 		cmd := fmt.Sprintf("curl -sL -o '%s' '%s' >/dev/null 2>&1", destPath, url)
+		// 		err = session.Run(cmd)
+		// 		session.Close()
+		// 		if err == nil {
+		// 			return nil // Download succeeded
+		// 		}
+		// 	}
+		// }
+
+		// if fs.downloadTool == "wget" {
+		// 	if session, err := fs.sshClient.NewSession(); err == nil {
+		// 		cmd := fmt.Sprintf("wget -q -O '%s' '%s' >/dev/null 2>&1", destPath, url)
+		// 		err = session.Run(cmd)
+		// 		session.Close()
+		// 		if err == nil {
+		// 			return nil // Download succeeded with wget
+		// 		}
+		// 	}
 	}
 
 	// If serverside download failed, fall back to local download and upload
+	tui.Logger.Debug("Downloading file locally via HTTP...")
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download mod: %w", err)
@@ -254,9 +271,8 @@ func (fs *SFTPFS) SyncToDir(dest string) error {
 	return nil
 }
 
-func (fs *SFTPFS) Backup() (string, error) {
+func (fs *SFTPFS) Backup(baseDirName string) (string, error) {
 	timestamp := time.Now().Format("2006-01-02_150405")
-	baseDirName := filepath.Base(fs.BaseDir)
 
 	/*
 	* Server-side backup using tar (if shell access is available)
@@ -269,18 +285,14 @@ func (fs *SFTPFS) Backup() (string, error) {
 		tarFileName := fmt.Sprintf("%s_backup_%s.tar", baseDirName, timestamp)
 		tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
 
-		if session, err := fs.sshClient.NewSession(); err == nil {
-			cmd := fmt.Sprintf("tar -cf '%s' -C '%s' '%s' >/dev/null 2>&1", tarPath, parentDir, baseDirName)
-			err = runWithTimeout(session, cmd, 30*time.Second)
-			session.Close()
-			if err == nil {
-				tui.Logger.Debug("Server-side tar backup successful", "tarPath", tarPath)
-				return tarPath, nil
-			}
-			tui.Logger.Warn("Server-side tar backup failed, falling back to zip method", "error", err)
-		} else {
-			tui.Logger.Warn("Failed to create SSH session for server-side backup, falling back to zip method", "error", err)
+		// if session, err := fs.sshClient.NewSession(); err == nil {
+		cmd := fmt.Sprintf("tar -cf '%s' -C '%s' '%s' >/dev/null 2>&1", tarPath, parentDir, baseDirName)
+		_, err := runCmdWithTimeout(fs.sshClient, cmd, 30*time.Second)
+		if err == nil {
+			tui.Logger.Debug("Server-side tar backup successful", "tarPath", tarPath)
+			return tarPath, nil
 		}
+		tui.Logger.Warn("Server-side tar backup failed, falling back to zip method", "error", err)
 	}
 
 	/*
@@ -306,50 +318,159 @@ func (fs *SFTPFS) Close() error {
 	return fs.sshClient.Close()
 }
 
-func shellProbe(sshClient *ssh.Client) bool {
-	resultCh := make(chan bool, 1)
+// func shellProbe(sshClient *ssh.Client) bool {
+// 	resultCh := make(chan bool, 1)
 
-	go func() {
-		session, err := sshClient.NewSession()
-		if err != nil {
-			resultCh <- false
-			return
-		}
-		defer session.Close()
+// 	go func() {
+// 		session, err := sshClient.NewSession()
+// 		if err != nil {
+// 			resultCh <- false
+// 			return
+// 		}
+// 		defer session.Close()
 
-		err = session.Run("echo gorinth-probe")
-		resultCh <- (err == nil)
-	}()
+// 		err = session.Run("echo gorinth-probe")
+// 		resultCh <- (err == nil)
+// 	}()
 
-	select {
-	case <-time.After(3 * time.Second):
-		tui.Logger.Debug("SSH shell probe timed out, assuming no shell access")
-		return false // Timeout, assume no shell access
-	case res := <-resultCh:
-		return res
+// 	select {
+// 	case <-time.After(3 * time.Second):
+// 		tui.Logger.Debug("SSH shell probe timed out, assuming no shell access")
+// 		return false // Timeout, assume no shell access
+// 	case res := <-resultCh:
+// 		return res
+// 	}
+
+// }
+
+func shellProbe(client *ssh.Client) bool {
+	probeStr := fmt.Sprintf("gorinth-probe-%d", time.Now().Unix())
+
+	out, err := runCmdWithTimeout(client, "echo "+probeStr, 3*time.Second)
+	if err != nil {
+		tui.Logger.Debug("SSH shell probe failed", "error", err)
+		return false
 	}
 
+	return strings.Contains(out, probeStr)
 }
 
-func runWithTimeout(session *ssh.Session, command string, timeout time.Duration) error {
-	// Create a channel to listen for command completion
-	errCh := make(chan error, 1)
+func (fs *SFTPFS) determineDownloadMethod(client *ssh.Client) string {
+	if !fs.hasShell {
+		return "sftp" // no shell access, must use sftp
+	}
 
-	// Run the command in a separate goroutine
+	_, err := runCmdWithTimeout(client, "command -v curl || which curl", 2*time.Second)
+	if err == nil {
+		return "curl"
+	}
+
+	_, err = runCmdWithTimeout(client, "command -v wget || which wget", 2*time.Second)
+	if err == nil {
+		return "wget"
+	}
+
+	return "sftp" // fallback to sftp method
+}
+
+// func (fs *SFTPS) runSession(cmd string, timeout time.Duration) error {
+// 	session, err := fs.sshClient.NewSession()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to open session: %w", err)
+// 	}
+
+// 	errCh := make(chan error, 1)
+// 	go func() {
+// 		errCh <- session.Run(cmd)
+// 	}()
+
+// 	select {
+// 	case <-time.After(timeout):
+
+// 		session.Close()
+// 		return fmt.Errorf("command timed out and session was closed")
+// 	case err := <-errCh:
+// 		session.Close()
+// 		return err
+// 	}
+// }
+
+// func runWithTimeout(session *ssh.Session, command string, timeout time.Duration) error {
+// 	// Create a channel to listen for command completion
+// 	errCh := make(chan error, 1)
+
+// 	// Run the command in a separate goroutine
+// 	go func() {
+// 		errCh <- session.Run(command)
+// 	}()
+
+// 	// Run against a timer
+// 	select {
+// 	case <-time.After(timeout):
+
+// 		// Timeout occurred, attempt to kill the session
+// 		_ = session.Signal(ssh.SIGKILL) // Best effort to kill the session
+// 		session.Close()
+// 		return fmt.Errorf("command timed out and session was closed")
+// 	case err := <-errCh:
+// 		// Command completed before timeout
+// 		return err
+// 	}
+// }
+
+func runCmdWithTimeout(client *ssh.Client, cmd string, timeout time.Duration) (string, error) {
+	tui.Logger.Debug("running command")
+
+	// Timeout wrapper for session creation
+	type sessionResult struct {
+		session *ssh.Session
+		err     error
+	}
+	sessionCh := make(chan sessionResult, 1)
+
 	go func() {
-		errCh <- session.Run(command)
+		s, err := client.NewSession()
+		sessionCh <- sessionResult{session: s, err: err}
 	}()
 
-	// Run against a timer
+	var session *ssh.Session
 	select {
 	case <-time.After(timeout):
-
-		// Timeout occurred, attempt to kill the session
-		_ = session.Signal(ssh.SIGKILL) // Best effort to kill the session
-		session.Close()
-		return fmt.Errorf("command timed out and session was closed")
-	case err := <-errCh:
-		// Command completed before timeout
-		return err
+		return "", fmt.Errorf("timed out waiting for server to create SSH session")
+	case res := <-sessionCh:
+		if res.err != nil {
+			return "", fmt.Errorf("failed to create SSH session: %w", res.err)
+		}
+		session = res.session
 	}
+
+	tui.Logger.Debug("session created")
+
+	defer session.Close()
+
+	var stdoutBuf bytes.Buffer
+	session.Stdout = &stdoutBuf
+
+	// Timeout wrapper for command execution
+	done := make(chan error, 1)
+	go func() {
+		tui.Logger.Debug("starting command execution", "cmd", cmd)
+		done <- session.Run(cmd)
+	}()
+
+	select {
+	case <-time.After(timeout):
+		tui.Logger.Warn("Command timed out, attempting to close session", "cmd", cmd)
+		session.Close()
+		<-done // Ensure goroutine exits
+		return "", fmt.Errorf("command timed out and session was closed")
+	case err := <-done:
+		tui.Logger.Debug("command execution completed", "cmd", cmd, "output", stdoutBuf.String(), "error", err)
+		session.Close()
+		if err != nil {
+			return "", fmt.Errorf("command execution failed: %w", err)
+		}
+		return stdoutBuf.String(), nil
+	}
+
 }

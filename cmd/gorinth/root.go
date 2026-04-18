@@ -21,6 +21,7 @@ type Config struct {
 	Dir          string `mapstructure:"dir"`
 	NoTruncate   bool   `mapstructure:"no-truncate"`
 	SkipBackup   bool   `mapstructure:"skip-backup"`
+	UploadBackup bool   `mapstructure:"upload-backup"`
 	Direct       bool   `mapstructure:"direct"`
 	Debug        bool   `mapstructure:"debug"`
 	Force        bool   `mapstructure:"force"`
@@ -104,6 +105,7 @@ func setupFlags() {
 	// Utility
 	flags.Bool("no-truncate", false, "Disable truncation of mod names in the update table for better readability")
 	flags.Bool("skip-backup", false, "Skip backup creation before applying updates. Not recommended.")
+	flags.Bool("upload-backup", false, "Upload backup to remote server after creation")
 	flags.BoolP("debug", "d", false, "Enable debug logging")
 	flags.Bool("force", false, "Bypass safety checks and force updates. May break everything. Use with caution.")
 	flags.Bool("direct", false, "Directly apply updates without staging area.")

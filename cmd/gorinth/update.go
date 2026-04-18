@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"syscall"
 
@@ -245,12 +246,15 @@ var updateCmd = &cobra.Command{
 
 func (state *GorinthState) performBackup() error {
 	spinner, _ := tui.StartSpinner("Creating backup...")
-	backupPath, err := state.WorkingFS.Backup()
+
+	realName := filepath.Base(AppConfig.Dir)
+
+	backupPath, err := state.WorkingFS.Backup(realName)
 	if err != nil {
 		spinner.Fail("Failed to create backup")
 		return err
-	} else {
-		spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
 	}
+
+	spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
 	return nil
 }

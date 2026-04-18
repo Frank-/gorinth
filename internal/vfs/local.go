@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Frank-/gorinth/internal/tui"
 )
 
 type LocalFS struct {
@@ -163,13 +165,15 @@ func (fs *LocalFS) SyncToDir(dest string) error {
 	return nil
 }
 
-func (fs *LocalFS) Backup() (string, error) {
+func (fs *LocalFS) Backup(baseDirName string) (string, error) {
+	tui.Logger.Info("Creating backup of local mods directory...")
 	mods, err := fs.ListMods()
 	if err != nil {
 		return "", fmt.Errorf("failed to read mods directory: %w", err)
 	}
 
-	baseDirName := filepath.Base(fs.BaseDir)
+	// baseDirName := filepath.Base(fs.BaseDir)
+	tui.Logger.Debug("Backing up mods", "modCount", len(mods), "baseDir", baseDirName)
 	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
 		return os.Open(filepath.Join(fs.BaseDir, mod))
 	})

@@ -13,7 +13,8 @@ func createLocalZip(baseDirName string, mods []string, openFile func(mod string)
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 
 	// Ensure we have a local directory to store the backup in
-	localBackupDir := "backups"
+	cwd, _ := os.Getwd()
+	localBackupDir := filepath.Join(cwd, "backups")
 	if err := os.MkdirAll(localBackupDir, os.ModePerm); err != nil {
 		return "", fmt.Errorf("failed to create local backup directory: %w", err)
 	}

@@ -11,6 +11,6 @@ type FileSystem interface {
 	Rename(oldName, newName string) error
 	DownloadMod(url string, targetFilename string) error
 	SyncToDir(dest string) error
-	Backup() (string, error)
+	Backup(baseDirName string) (string, error)
 	Close() error
 }
