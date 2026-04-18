@@ -102,6 +102,7 @@ func setupFlags() {
 
 	// Utility
 	flags.Bool("no-truncate", false, "Disable truncation of mod names in the update table for better readability")
+	flags.Bool("skip-backup", false, "Skip backup creation before applying updates. Not recommended.")
 	flags.BoolP("debug", "d", false, "Enable debug logging")
 	flags.Bool("force", false, "Bypass safety checks and force updates. May break everything. Use with caution.")
 
