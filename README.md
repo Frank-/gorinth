@@ -2,6 +2,8 @@
 
 ## Work in progress
 
+TODO: Update documentation, clean up backup code 
+
 CLI tool for updating Minecraft server mods from Modrinth, written in Go.
 
 ```bash
