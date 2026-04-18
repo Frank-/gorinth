@@ -1,7 +1,6 @@
 package vfs
 
 import (
-	"archive/zip"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type LocalFS struct {
@@ -113,52 +111,15 @@ func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
 }
 
 func (fs *LocalFS) Backup() (string, error) {
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	backupName := fmt.Sprintf("%s_backup_%s.zip", fs.BaseDir, timestamp)
-	// backupName := fmt.Sprintf("mods_backup_%s.zip", timestamp)
-
-	parentDir := filepath.Dir(fs.BaseDir)
-	backupPath := filepath.Join(parentDir, backupName)
-
-	// Create the zip file
-	zipFile, err := os.Create(backupPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create backup file: %w", err)
-	}
-	defer zipFile.Close()
-
-	archive := zip.NewWriter(zipFile)
-	defer archive.Close()
-
-	entries, err := os.ReadDir(fs.BaseDir)
+	mods, err := fs.ListMods()
 	if err != nil {
 		return "", fmt.Errorf("failed to read mods directory: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jar") {
-			continue // Skip directories and non-jar files
-		}
-		modPath := filepath.Join(fs.BaseDir, entry.Name())
-		modFile, err := os.Open(modPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to open mod file: %w", err)
-		}
-
-		zipEntry, err := archive.Create(entry.Name())
-		if err != nil {
-			modFile.Close()
-			return "", fmt.Errorf("failed to create zip entry: %w", err)
-		}
-
-		if _, err := io.Copy(zipEntry, modFile); err != nil {
-			modFile.Close()
-			return "", fmt.Errorf("failed to write mod to zip: %w", err)
-		}
-		modFile.Close()
-	}
-
-	return backupPath, nil
+	baseDirName := filepath.Base(fs.BaseDir)
+	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
+		return os.Open(filepath.Join(fs.BaseDir, mod))
+	})
 }
 
 func (fs *LocalFS) Close() error {

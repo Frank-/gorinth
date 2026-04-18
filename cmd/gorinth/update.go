@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pterm/pterm"
@@ -25,7 +27,31 @@ var updateCmd = &cobra.Command{
 	Long:  `The update command checks for available updates for your Minecraft server mods and applies them automatically. This command will download the latest versions of your mods from Modrinth and replace the old versions in your server's mod directory, ensuring that your server is always running the most up-to-date mods.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		tui.Logger.Infof("Starting Gorinth Update in %s mode", AppConfig.Mode)
-		state, err := FetchGorinthState()
+
+		var state *GorinthState
+
+		// Listen for interrupt signals to allow graceful shutdown during the update process
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+		// Start a goroutine to handle interrupts and perform cleanup
+		go func() {
+			<-sigCh
+			fmt.Print("\r\033[K")
+			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
+
+			if state != nil && state.FS != nil {
+				state.FS.Close()
+				pterm.Success.Println("Cleanup complete. Exiting.")
+			} else {
+				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
+			}
+			os.Exit(1)
+		}()
+
+		var err error
+		state, err = FetchGorinthState()
+
 		if err != nil {
 			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
 		}
@@ -156,34 +182,33 @@ var updateCmd = &cobra.Command{
 		* Backup current mods before making any changes. This way if anything goes
 		* wrong during the update process, we can restore the original mods from the backup.
 		 */
-		spinner, _ := tui.StartSpinner("Creating backup...")
-		backupPath, err := state.FS.Backup()
-		if err != nil {
-			spinner.Fail("Failed to create backup")
-			tui.Logger.Fatal("Error creating backup", "error", err)
-		}
-		spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
 
-		if AppConfig.Force && len(brokenMods) > 0 {
-			pterm.Info.Printf("Recovery Tip: If your server fails to start, delete your current mods folder and restore from the backup above.\n\n")
+		if !AppConfig.SkipBackup {
+			spinner, _ := tui.StartSpinner("Creating backup...")
+			backupPath, err := state.FS.Backup()
+			if err != nil {
+				spinner.Fail("Failed to create backup")
+				tui.Logger.Fatal("Error creating backup", "error", err)
+			} else {
+				spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
+			}
+
+			if AppConfig.Force && len(brokenMods) > 0 {
+				pterm.Info.Printf("Recovery Tip: If your server fails to start, delete your current mods folder and restore from the backup above.\n\n")
+			}
+		} else {
+			tui.Logger.Warn("Skipping backup creation as per configuration. (--skip-backup enabled)")
 		}
 
 		/*
 		* Proceed with downloading and applying updates.
 		 */
+
 		successCount := 0
 		for _, task := range tasks {
 
 			updateText := fmt.Sprintf("Updating %s (%s -> %s)", task.DisplayName, task.CurrentVersion, task.NewVersion)
-			spinner, _ = tui.StartSpinner(updateText)
-
-			// // Download the new mod file
-			// resp, err := http.Get(task.DownloadURL)
-			// if err != nil {
-			// 	spinner.Fail("Download failed")
-			// 	tui.Logger.Error("Failed to download mod update", "mod", task.NewFilename, "error", err)
-			// 	continue
-			// }
+			spinner, _ := tui.StartSpinner(updateText)
 
 			tmpName := task.NewFilename + ".tmp"
 			if err := state.FS.DownloadMod(task.DownloadURL, tmpName); err != nil {
@@ -191,14 +216,6 @@ var updateCmd = &cobra.Command{
 				tui.Logger.Error("Failed to download mod update", "mod", task.NewFilename, "error", err)
 				continue
 			}
-
-			// // Stream directly to server
-			// if err := state.FS.WriteMod(tmpName, resp.Body); err != nil {
-			// 	resp.Body.Close()
-			// 	spinner.Fail("Failed to write to disk/server")
-			// 	continue
-			// }
-			// defer resp.Body.Close()
 
 			if err := state.FS.DeleteMod(task.OldFilename); err != nil {
 				tui.Logger.Error("Failed to delete old mod", "mod", task.OldFilename, "error", err)

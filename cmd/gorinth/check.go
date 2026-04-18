@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pterm/pterm"
@@ -16,7 +19,30 @@ var checkCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		tui.Logger.Infof("Starting Gorinth in %s mode", AppConfig.Mode)
 
-		state, err := FetchGorinthState()
+		var state *GorinthState
+
+		// Listen for interrupt signals to allow graceful shutdown during the update process
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+		// Start a goroutine to handle interrupts and perform cleanup
+		go func() {
+			<-sigCh
+			fmt.Print("\r\033[K")
+			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
+
+			if state != nil && state.FS != nil {
+				state.FS.Close()
+				pterm.Success.Println("Cleanup complete. Exiting.")
+			} else {
+				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
+			}
+			os.Exit(1)
+		}()
+
+		var err error
+		state, err = FetchGorinthState()
+
 		if err != nil {
 			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
 		}

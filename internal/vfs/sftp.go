@@ -1,7 +1,6 @@
 package vfs
 
 import (
-	"archive/zip"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -42,13 +41,13 @@ func NewSFTPFS(host string, port int, user, pass, dir string) (*SFTPFS, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to SSH server: %w", err)
 	}
-
+	tui.Logger.Debug("SSH connection established successfully")
 	sftpClient, err := sftp.NewClient(sshClient)
 	if err != nil {
 		sshClient.Close()
 		return nil, fmt.Errorf("failed to create SFTP client: %w", err)
 	}
-
+	tui.Logger.Debug("SFTP client initialized successfully")
 	// Verify that the base directory exists and is a directory
 	info, err := sftpClient.Stat(dir)
 	if os.IsNotExist(err) {
@@ -61,6 +60,9 @@ func NewSFTPFS(host string, port int, user, pass, dir string) (*SFTPFS, error) {
 		return nil, fmt.Errorf("remote mod path is not a directory: %s", dir)
 	}
 
+	tui.Logger.Debug("SFTP connection established successfully")
+
+	tui.Logger.Debug("Probing for SSH shell access to determine available operations")
 	// Check for shell access to determine if we can do server-side operations like direct downloads and tar backups
 	hasShell := shellProbe(sshClient)
 	if hasShell {
@@ -202,71 +204,48 @@ func (fs *SFTPFS) DownloadMod(url string, targetFilename string) error {
 
 func (fs *SFTPFS) Backup() (string, error) {
 	timestamp := time.Now().Format("2006-01-02_150405")
-	parentDir := filepath.Dir(fs.BaseDir)
 	baseDirName := filepath.Base(fs.BaseDir)
-	backupDirName := fmt.Sprintf("%s_backup_%s", baseDirName, timestamp)
 
-	tarFileName := fmt.Sprintf("%s.tar", backupDirName)
-	tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
+	/*
+	* Server-side backup using tar (if shell access is available)
+	 */
 
-	tui.Logger.Debug("Attempting server-side backup using tar", "tarPath", tarPath)
+	if fs.hasShell {
+		tui.Logger.Debug("Attempting server-side backup using tar", "baseDir", fs.BaseDir)
 
-	if session, err := fs.sshClient.NewSession(); err == nil {
-		cmd := fmt.Sprintf("tar -cf '%s' -C '%s' '%s' >/dev/null 2>&1", tarPath, parentDir, baseDirName)
-		err = runWithTimeout(session, cmd, 30*time.Second)
-		session.Close()
-		if err == nil {
-			// Successfully created tar.gz backup on the server, return its path
-			return tarPath, nil
+		parentDir := filepath.Dir(fs.BaseDir)
+		tarFileName := fmt.Sprintf("%s_backup_%s.tar", baseDirName, timestamp)
+		tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
+
+		if session, err := fs.sshClient.NewSession(); err == nil {
+			cmd := fmt.Sprintf("tar -cf '%s' -C '%s' '%s' >/dev/null 2>&1", tarPath, parentDir, baseDirName)
+			err = runWithTimeout(session, cmd, 30*time.Second)
+			session.Close()
+			if err == nil {
+				tui.Logger.Debug("Server-side tar backup successful", "tarPath", tarPath)
+				return tarPath, nil
+			}
+			tui.Logger.Warn("Server-side tar backup failed, falling back to zip method", "error", err)
+		} else {
+			tui.Logger.Warn("Failed to create SSH session for server-side backup, falling back to zip method", "error", err)
 		}
-		// Failed  - fall back to directory copy method
 	}
 
-	zipFileName := fmt.Sprintf("%s.zip", backupDirName)
-	zipPath := filepath.ToSlash(filepath.Join(parentDir, zipFileName))
-
-	tui.Logger.Debug("Creating fallback zip file...", "path", zipPath)
-	zipFile, err := fs.sftpClient.Create(zipPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create backup file: %w", err)
-	}
-	defer zipFile.Close()
-
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+	/*
+	* Local zip backup
+	 */
 
 	mods, err := fs.ListMods()
 	if err != nil {
 		return "", fmt.Errorf("failed to list mods for backup: %w", err)
 	}
 
-	// We need to stream data through local temp files since SFTP does not support server-side copying
-	for _, mod := range mods {
-		srcPath := filepath.ToSlash(filepath.Join(fs.BaseDir, mod))
+	tui.Logger.Debug("Creating local zip backup of mods", "modCount", len(mods))
+	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
+		path := filepath.ToSlash(filepath.Join(fs.BaseDir, mod))
+		return fs.sftpClient.Open(path)
+	})
 
-		srcFile, err := fs.sftpClient.Open(srcPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to open source mod for backup: %w", err)
-		}
-
-		writer, err := zipWriter.Create(mod)
-		if err != nil {
-			srcFile.Close()
-			return "", fmt.Errorf("failed to create destination mod for backup: %w", err)
-		}
-
-		buf, err := io.ReadAll(srcFile)
-		srcFile.Close()
-		if err != nil {
-			return "", fmt.Errorf("failed to read source mod for backup: %w", err)
-		}
-
-		if _, err := writer.Write(buf); err != nil {
-			return "", fmt.Errorf("failed to write mod to zip: %w", err)
-		}
-	}
-	tui.Logger.Debug("Zip backup successful!")
-	return zipPath, nil
 }
 
 // Close the SFTP and SSH connections when done
@@ -276,15 +255,28 @@ func (fs *SFTPFS) Close() error {
 }
 
 func shellProbe(sshClient *ssh.Client) bool {
-	session, err := sshClient.NewSession()
-	if err != nil {
-		return false
+	resultCh := make(chan bool, 1)
+
+	go func() {
+		session, err := sshClient.NewSession()
+		if err != nil {
+			resultCh <- false
+			return
+		}
+		defer session.Close()
+
+		err = session.Run("echo gorinth-probe")
+		resultCh <- (err == nil)
+	}()
+
+	select {
+	case <-time.After(3 * time.Second):
+		tui.Logger.Debug("SSH shell probe timed out, assuming no shell access")
+		return false // Timeout, assume no shell access
+	case res := <-resultCh:
+		return res
 	}
 
-	err = runWithTimeout(session, "echo gorinth-probe", 2*time.Second)
-	session.Close()
-
-	return err == nil
 }
 
 func runWithTimeout(session *ssh.Session, command string, timeout time.Duration) error {
@@ -299,6 +291,7 @@ func runWithTimeout(session *ssh.Session, command string, timeout time.Duration)
 	// Run against a timer
 	select {
 	case <-time.After(timeout):
+
 		// Timeout occurred, attempt to kill the session
 		_ = session.Signal(ssh.SIGKILL) // Best effort to kill the session
 		session.Close()

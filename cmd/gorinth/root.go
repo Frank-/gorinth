@@ -19,9 +19,10 @@ type Config struct {
 	GameVersion  string `mapstructure:"game-version"`
 	Loader       string `mapstructure:"loader"`
 	Dir          string `mapstructure:"dir"`
+	NoTruncate   bool   `mapstructure:"no-truncate"`
+	SkipBackup   bool   `mapstructure:"skip-backup"`
 	Debug        bool   `mapstructure:"debug"`
 	Force        bool   `mapstructure:"force"`
-	NoTruncate   bool   `mapstructure:"no-truncate"`
 }
 
 var AppConfig Config
