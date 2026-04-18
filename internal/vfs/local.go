@@ -62,6 +62,26 @@ func (fs *LocalFS) HashMod(filename string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+func (fs *LocalFS) HashMods() (map[string]string, error) {
+	hashes := make(map[string]string)
+
+	mods, err := fs.ListMods()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list mods: %w", err)
+	}
+
+	for _, mod := range mods {
+		hash, err := fs.HashMod(mod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash mod '%s': %w", mod, err)
+		}
+
+		hashes[mod] = hash
+	}
+
+	return hashes, nil
+}
+
 func (fs *LocalFS) DeleteMod(filename string) error {
 	path := filepath.Join(fs.BaseDir, filename)
 	return os.Remove(path)
@@ -108,6 +128,39 @@ func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
 
 	_, err = io.Copy(file, resp.Body)
 	return err
+}
+
+func (fs *LocalFS) SyncToDir(dest string) error {
+	mods, err := fs.ListMods()
+	if err != nil {
+		return fmt.Errorf("failed to list mods for syncing: %w", err)
+	}
+
+	for _, mod := range mods {
+		srcPath := filepath.Join(fs.BaseDir, mod)
+		destPath := filepath.Join(dest, mod)
+
+		srcFile, err := os.Open(srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to open source mod file '%s': %w", srcPath, err)
+		}
+
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			srcFile.Close()
+			return fmt.Errorf("failed to create destination mod file '%s': %w", destPath, err)
+		}
+
+		_, err = io.Copy(destFile, srcFile)
+		srcFile.Close()
+		destFile.Close()
+
+		if err != nil {
+			return fmt.Errorf("failed to copy mod file '%s' to '%s': %w", srcPath, destPath, err)
+		}
+	}
+
+	return nil
 }
 
 func (fs *LocalFS) Backup() (string, error) {

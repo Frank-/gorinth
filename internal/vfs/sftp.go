@@ -112,6 +112,25 @@ func (fs *SFTPFS) HashMod(filename string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+func (fs *SFTPFS) HashMods() (map[string]string, error) {
+	hashes := make(map[string]string)
+
+	mods, err := fs.ListMods()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list mods: %w", err)
+	}
+
+	for _, mod := range mods {
+		hash, err := fs.HashMod(mod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash mod '%s': %w", mod, err)
+		}
+		hashes[mod] = hash
+	}
+
+	return hashes, nil
+}
+
 func (fs *SFTPFS) DeleteMod(filename string) error {
 	path := filepath.ToSlash(filepath.Join(fs.BaseDir, filename))
 	return fs.sftpClient.Remove(path)
@@ -200,6 +219,39 @@ func (fs *SFTPFS) DownloadMod(url string, targetFilename string) error {
 
 	_, err = io.Copy(destFile, resp.Body)
 	return err
+}
+
+func (fs *SFTPFS) SyncToDir(dest string) error {
+	mods, err := fs.ListMods()
+	if err != nil {
+		return fmt.Errorf("failed to list mods for sync: %w", err)
+	}
+
+	for _, mod := range mods {
+		srcPath := filepath.ToSlash(filepath.Join(fs.BaseDir, mod))
+		destPath := filepath.Join(dest, mod)
+
+		srcFile, err := fs.sftpClient.Open(srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to open remote mod file: %w", err)
+		}
+
+		destFile, err := os.Create(destPath)
+		if err != nil {
+			srcFile.Close()
+			return fmt.Errorf("failed to create local file for sync: %w", err)
+		}
+
+		_, err = io.Copy(destFile, srcFile)
+		srcFile.Close()
+		destFile.Close()
+
+		if err != nil {
+			return fmt.Errorf("failed to copy mod file during sync: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (fs *SFTPFS) Backup() (string, error) {

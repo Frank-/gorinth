@@ -21,6 +21,7 @@ type Config struct {
 	Dir          string `mapstructure:"dir"`
 	NoTruncate   bool   `mapstructure:"no-truncate"`
 	SkipBackup   bool   `mapstructure:"skip-backup"`
+	Direct       bool   `mapstructure:"direct"`
 	Debug        bool   `mapstructure:"debug"`
 	Force        bool   `mapstructure:"force"`
 }
@@ -105,6 +106,7 @@ func setupFlags() {
 	flags.Bool("skip-backup", false, "Skip backup creation before applying updates. Not recommended.")
 	flags.BoolP("debug", "d", false, "Enable debug logging")
 	flags.Bool("force", false, "Bypass safety checks and force updates. May break everything. Use with caution.")
+	flags.Bool("direct", false, "Directly apply updates without staging area.")
 
 	// Bind everything
 	viper.BindPFlags(flags)

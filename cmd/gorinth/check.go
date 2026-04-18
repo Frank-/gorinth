@@ -31,8 +31,8 @@ var checkCmd = &cobra.Command{
 			fmt.Print("\r\033[K")
 			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
 
-			if state != nil && state.FS != nil {
-				state.FS.Close()
+			if state != nil && state.RemoteFS != nil {
+				state.RemoteFS.Close()
 				pterm.Success.Println("Cleanup complete. Exiting.")
 			} else {
 				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
@@ -47,7 +47,14 @@ var checkCmd = &cobra.Command{
 			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
 		}
 
-		defer state.FS.Close()
+		defer func() {
+			if state.StagingDir != "" {
+				os.RemoveAll(state.StagingDir)
+			}
+			if state.RemoteFS != nil {
+				state.RemoteFS.Close()
+			}
+		}()
 
 		// Initialise table with header
 		tableData := pterm.TableData{buildTableHeader()}

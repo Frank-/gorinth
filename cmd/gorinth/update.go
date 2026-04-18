@@ -40,8 +40,8 @@ var updateCmd = &cobra.Command{
 			fmt.Print("\r\033[K")
 			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
 
-			if state != nil && state.FS != nil {
-				state.FS.Close()
+			if state != nil && state.RemoteFS != nil {
+				state.RemoteFS.Close()
 				pterm.Success.Println("Cleanup complete. Exiting.")
 			} else {
 				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
@@ -56,10 +56,16 @@ var updateCmd = &cobra.Command{
 			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
 		}
 
-		defer state.FS.Close()
+		defer func() {
+			if state.StagingDir != "" {
+				os.RemoveAll(state.StagingDir)
+			}
+			if state.RemoteFS != nil {
+				state.RemoteFS.Close()
+			}
+		}()
 
 		var tasks []UpdateTask
-		// brokenMods := 0
 		var brokenMods []string
 
 		for _, filename := range state.Mods {
@@ -67,11 +73,10 @@ var updateCmd = &cobra.Command{
 			update, hasUpdate := state.Updates[hash]
 			current, isKnown := state.CurrentVersions[hash]
 
-			// If the mod is not known to Modrinth, we can't reliably update it.
-			// Warn and skip - it may be a private mod etc
+			// If the mod is not known to Modrinth warn and skip
 			if !isKnown {
 				tui.Logger.Warn("Unmanaged mod bypassed (Not on Modrinth)", "mod", filename)
-				continue // Skip adding to tasks or brokenMods
+				continue
 			}
 
 			if hasUpdate && isKnown && update.ID == current.ID {
@@ -90,7 +95,6 @@ var updateCmd = &cobra.Command{
 
 			// If mod does not support target and has no update, it is effectively broken for the target version
 			if isKnown && !supportsTarget && !hasUpdate {
-				// brokenMods++
 				brokenMods = append(brokenMods, filename)
 				tui.Logger.Warn("Mod is incompatible with target Minecraft version and has no update available", "mod", filename, "target_version", AppConfig.GameVersion)
 			}
@@ -114,7 +118,7 @@ var updateCmd = &cobra.Command{
 				}
 			}
 
-			// If nopriary file marked just take the first one
+			// If no primary file marked just take the first one
 			if downloadURL == "" && len(update.Files) > 0 {
 				downloadURL = update.Files[0].URL
 				newFilename = update.Files[0].Filename
@@ -133,7 +137,6 @@ var updateCmd = &cobra.Command{
 		// If there are broken mods and force flag is not set, abort the update process to prevent potential issues with the server. This is a safety measure to ensure that users are aware of compatibility issues before proceeding with updates.
 		if len(brokenMods) > 0 {
 			tableData := pterm.TableData{buildTableHeader()}
-
 			sort.Strings(brokenMods)
 
 			for _, filename := range brokenMods {
@@ -161,10 +164,8 @@ var updateCmd = &cobra.Command{
 			if !AppConfig.Force {
 				pterm.Error.Printfln("Update aborted! %d mods are incompatible with %s and have no updates.", len(brokenMods), AppConfig.GameVersion)
 				pterm.Warning.Printfln("Continuing would break your server. Use --force to bypass this check (not recommended).")
-				state.FS.Close()
-				os.Exit(1)
+				return
 			} else {
-				// The Force Override Warning
 				pterm.Warning.Printfln("DANGER: Force flag detected. Proceeding with update despite %d incompatible mods.", len(brokenMods))
 				pterm.Info.Printfln("A backup will be created before any files are modified so you can roll back if the server crashes.")
 			}
@@ -179,18 +180,15 @@ var updateCmd = &cobra.Command{
 		pterm.Info.Printfln("Found %d mods with updates available. Starting update process...", len(tasks))
 
 		/*
-		* Backup current mods before making any changes. This way if anything goes
-		* wrong during the update process, we can restore the original mods from the backup.
+		* Backup current mods before making any changes.
 		 */
 
 		if !AppConfig.SkipBackup {
-			spinner, _ := tui.StartSpinner("Creating backup...")
-			backupPath, err := state.FS.Backup()
-			if err != nil {
-				spinner.Fail("Failed to create backup")
-				tui.Logger.Fatal("Error creating backup", "error", err)
+			if err := state.performBackup(); err != nil {
+				tui.Logger.Error("Failed to create backup before updates", "error", err)
+				pterm.Warning.Printfln("Proceeding without backup! This is not recommended. Use --skip-backup to bypass this warning.")
 			} else {
-				spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
+				pterm.Success.Printfln("Backup created successfully! Backup file will be retained after updates.")
 			}
 
 			if AppConfig.Force && len(brokenMods) > 0 {
@@ -211,17 +209,17 @@ var updateCmd = &cobra.Command{
 			spinner, _ := tui.StartSpinner(updateText)
 
 			tmpName := task.NewFilename + ".tmp"
-			if err := state.FS.DownloadMod(task.DownloadURL, tmpName); err != nil {
+			if err := state.RemoteFS.DownloadMod(task.DownloadURL, tmpName); err != nil {
 				spinner.Fail("Download failed")
 				tui.Logger.Error("Failed to download mod update", "mod", task.NewFilename, "error", err)
 				continue
 			}
 
-			if err := state.FS.DeleteMod(task.OldFilename); err != nil {
+			if err := state.RemoteFS.DeleteMod(task.OldFilename); err != nil {
 				tui.Logger.Error("Failed to delete old mod", "mod", task.OldFilename, "error", err)
 			}
 
-			if err := state.FS.Rename(tmpName, task.NewFilename); err != nil {
+			if err := state.RemoteFS.Rename(tmpName, task.NewFilename); err != nil {
 				spinner.Fail("Failed to finalize file name")
 				tui.Logger.Error("Failed to rename new mod", "mod", task.NewFilename, "error", err)
 				continue
@@ -243,4 +241,16 @@ var updateCmd = &cobra.Command{
 		}
 
 	},
+}
+
+func (state *GorinthState) performBackup() error {
+	spinner, _ := tui.StartSpinner("Creating backup...")
+	backupPath, err := state.WorkingFS.Backup()
+	if err != nil {
+		spinner.Fail("Failed to create backup")
+		return err
+	} else {
+		spinner.Success(fmt.Sprintf("Backup created at %s", backupPath))
+	}
+	return nil
 }
