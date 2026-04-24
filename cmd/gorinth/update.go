@@ -247,7 +247,7 @@ var updateCmd = &cobra.Command{
 func (state *GorinthState) performBackup() error {
 	spinner, _ := tui.StartSpinner("Creating backup...")
 
-	realName := filepath.Base(AppConfig.Dir)
+	realName := filepath.Base(AppConfig.ModsDir)
 
 	backupPath, err := state.WorkingFS.Backup(realName)
 	if err != nil {

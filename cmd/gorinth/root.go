@@ -12,13 +12,13 @@ import (
 type Config struct {
 	ConfigFile   string `mapstructure:"config-file"`
 	Mode         string `mapstructure:"mode"`
-	SFTPHost     string `mapstructure:"sftp-host"`
-	SFTPPort     int    `mapstructure:"sftp-port"`
-	SFTPUser     string `mapstructure:"sftp-user"`
-	SFTPPassword string `mapstructure:"sftp-password"`
+	Host         string `mapstructure:"host"`
+	Port         int    `mapstructure:"port"`
+	User         string `mapstructure:"user"`
+	Password     string `mapstructure:"password"`
 	GameVersion  string `mapstructure:"game-version"`
 	Loader       string `mapstructure:"loader"`
-	Dir          string `mapstructure:"dir"`
+	ModsDir      string `mapstructure:"mods-dir"`
 	NoTruncate   bool   `mapstructure:"no-truncate"`
 	SkipBackup   bool   `mapstructure:"skip-backup"`
 	UploadBackup bool   `mapstructure:"upload-backup"`
@@ -90,10 +90,10 @@ func setupFlags() {
 	flags.String("mode", "sftp", "Mode of operation: `local` or `sftp`")
 	flags.String("config-file", "config.yaml", "Path to the configuration file")
 	// Connection
-	flags.String("sftp-host", "localhost", "SFTP host for remote server")
-	flags.IntP("sftp-port", "p", 22, "SFTP port for remote server")
-	flags.StringP("sftp-user", "u", "user", "SFTP username for remote server")
-	flags.String("sftp-password", "password", "SFTP password for remote server")
+	flags.String("host", "localhost", "SFTP host for remote server")
+	flags.IntP("port", "p", 22, "SFTP port for remote server")
+	flags.StringP("user", "u", "user", "SFTP username for remote server")
+	flags.String("spassword", "password", "SFTP password for remote server")
 
 	// Directory
 	flags.String("dir", ".", "Directory to store mods")
