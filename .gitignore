@@ -32,3 +32,5 @@ local.config.yaml
 
 # OSX
 .DS_Store
+
+conductor/

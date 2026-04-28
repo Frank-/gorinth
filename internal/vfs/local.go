@@ -113,7 +113,7 @@ func (fs *LocalFS) CleanupTmpFiles() error {
 	}
 
 	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".gorinth-tmp") {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), TmpFileSuffix) {
 			path := filepath.Join(fs.BaseDir, f.Name())
 			fs.appFS.Remove(path)
 		}

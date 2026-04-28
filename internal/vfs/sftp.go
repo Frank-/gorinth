@@ -105,7 +105,7 @@ func (fs *SFTPFS) SyncToDir(dest string) error {
 			return fmt.Errorf("failed to open remote mod file: %w", err)
 		}
 
-		destFile, err := os.Create(destPath)
+		destFile, err := fs.appFS.Create(destPath)
 		if err != nil {
 			srcFile.Close()
 			return fmt.Errorf("failed to create local file for sync: %w", err)
@@ -152,5 +152,6 @@ func (fs *SFTPFS) Close() error {
 	if fs.localCacheDir != "" {
 		fs.appFS.RemoveAll(fs.localCacheDir)
 	}
+
 	return fs.sftpBase.Close()
 }

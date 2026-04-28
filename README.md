@@ -1,12 +1,41 @@
-# gorinth
+# gorinth 🐮
+
+A simple, fast, and secure CLI tool for updating Minecraft server mods directly from the [Modrinth API](https://docs.modrinth.com/).
 
 ## Work in progress
+AI-generated README.
 
-TODO: Update documentation, clean up backup code 
+## Core Concepts
 
-CLI tool for updating Minecraft server mods from Modrinth, written in Go.
+### 📂 The Mods Folder is the Source of Truth
+Gorinth looks at your existing `.jar` files to determine which mods you have installed. It computes their SHA-1 hashes and asks Modrinth: "What is this, and is there an update for my specific Minecraft version and loader?"
+
+### 🚀 Hybrid Hashing Strategy
+Gorinth is designed to be fast, even over slow connections:
+- **Local Mode**: Uses `afero` for standard filesystem operations.
+- **SSH Mode**: Executes `sha1sum` directly on the remote server. This is **zero-bandwidth** hashing—it doesn't download the mods just to check for updates.
+- **SFTP Mode (Fallback)**: If the server restricts shell access (common in Pterodactyl), Gorinth syncs a small local cache to perform hashing, ensuring compatibility with restricted environments.
+
+### 🛡️ Safety First
+- **Automatic Backups**: Creates a `.zip` or `.tar` of your mods folder before applying any changes.
+- **Atomic-ish Updates**: Downloads new mods to a temporary `.gorinth-tmp` file before swapping them, preventing corrupted mods if a download is interrupted.
+
+---
+
+## Installation
 
 ```bash
+go install github.com/Frank-/gorinth/cmd/gorinth@latest
+```
+
+---
+
+## Usage
+
+<!-- START_COMMAND_REFERENCE -->
+```text
+Gorinth is a command-line tool that helps you keep your Minecraft server mods up to date by fetching the latest versions from Modrinth.
+
 Usage:
   gorinth [flags]
   gorinth [command]
@@ -18,49 +47,48 @@ Available Commands:
   update      Check for updates and apply them to your Minecraft server mods.
 
 Flags:
-  -d, --debug                  Enable debug logging
-      --dir string             Directory to store mods (default ".")
-      --game-version string    Minecraft version to check for updates (default "1.20.4")
-  -h, --help                   help for gorinth
-      --loader string          Mod loader to check for updates (e.g. fabric, forge) (default "fabric")
-      --mode local             Mode of operation: local or `sftp` (default "local")
-      --sftp-host string       SFTP host for remote server (default "localhost")
-      --sftp-password string   SFTP password for remote server (default "password")
-  -p, --sftp-port int          SFTP port for remote server (default 22)
-  -u, --sftp-user string       SFTP username for remote server (default "user")
+      --config-file string    Path to the configuration file (default "config.yaml")
+  -d, --debug                 Enable debug logging
+      --direct                Directly apply updates without staging area.
+      --force                 Bypass safety checks and force updates. May break everything. Use with caution.
+      --game-version string   Minecraft version to check for updates (default "1.20.4")
+  -h, --help                  help for gorinth
+      --host string           SFTP host for remote server (default "localhost")
+      --loader string         Mod loader to check for updates (e.g. fabric, forge) (default "fabric")
+      --mode local            Mode of operation: local or `sftp` (default "sftp")
+      --mods-dir string       Directory to store mods (default "mods")
+      --no-truncate           Disable truncation of mod names in the update table for better readability
+      --password string       SFTP password for remote server (default "password")
+  -p, --port int              SFTP port for remote server (default 22)
+      --skip-backup           Skip backup creation before applying updates. Not recommended.
+      --upload-backup         Upload backup to remote server after creation
+  -u, --user string           SFTP username for remote server (default "user")
+
+Use "gorinth [command] --help" for more information about a command.
 ```
+<!-- END_COMMAND_REFERENCE -->
 
+---
 
-### Configuration
-You can configure gorinth using a `config.yaml` file or environment variables. The configuration options include:
+## Configuration
 
-**config.yaml:**
+You can use a `config.yaml` file to save your server details:
+
 ```yaml
-  # Mode of operation: local filesystem or `sftp` (default: "sftp")
-  mode:
-  # SFTP host for remote server
-  sftp-host`: 
-  # SFTP port for remote server
-  sftp-port`: 
-  # SFTP username for remote server
-  sftp-user`: 
-  # SFTP password for remote server 
-  sftp-password`: 
-  # Minecraft version to check for updates (default: "1.20.4")
-  game-version`: 
-  # Mod loader to check for updates (e.g. fabric, forge) (default: "fabric")
-  loader`: 
-  # Directory to store mods (default: ".")
-  dir`: 
+mode: sftp
+host: "play.example.com"
+user: "admin"
+password: "secure-password"
+game-version: "1.21.1"
+loader: "fabric"
+mods-dir: "mods"
 ```
 
-**Environment variables:**
-```bash
-  GORINTH_SFTP_HOST=localhost
-  GORINTH_SFTP_PORT=22
-  GORINTH_SFTP_USER=user
-  GORINTH_SFTP_PASSWORD=password
-  GORINTH_GAME_VERSION=1.21.1
-  GORINTH_LOADER=fabric
-  GORINTH_DIR=mods
-```
+Or use environment variables:
+`GORINTH_HOST`, `GORINTH_USER`, `GORINTH_PASSWORD`, etc.
+
+---
+
+## Developer Notes
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for details on the VFS implementation and how to test against restricted environments like Pterodactyl.

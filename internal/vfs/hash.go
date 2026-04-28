@@ -22,21 +22,35 @@ func computeHash(data io.Reader) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// Take any afero directory and compute the hash of all .jar files within it, returning a map of filename to hash
-func hashLocalDirectory(appFs afero.Fs, dir string) (map[string]string, error) {
-	hashes := make(map[string]string)
+func listJarFiles(appFs afero.Fs, dir string) ([]string, error) {
+	var jarFiles []string
 
 	files, err := afero.ReadDir(appFs, dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read local cache directory: %w", err)
+		return nil, err
 	}
 
 	for _, f := range files {
 		if f.IsDir() || !strings.HasSuffix(f.Name(), ".jar") {
 			continue
 		}
+		jarFiles = append(jarFiles, f.Name())
+	}
 
-		path := filepath.Join(dir, f.Name())
+	return jarFiles, nil
+}
+
+// Take any afero directory and compute the hash of all .jar files within it, returning a map of filename to hash
+func hashLocalDirectory(appFs afero.Fs, dir string) (map[string]string, error) {
+	hashes := make(map[string]string)
+
+	filenames, err := listJarFiles(appFs, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, name := range filenames {
+		path := filepath.Join(dir, name)
 		file, err := appFs.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open mod file from cache: %w", err)
@@ -46,9 +60,9 @@ func hashLocalDirectory(appFs afero.Fs, dir string) (map[string]string, error) {
 		file.Close()
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to compute hash for mod '%s': %w", f.Name(), err)
+			return nil, fmt.Errorf("failed to compute hash for mod '%s': %w", name, err)
 		}
-		hashes[f.Name()] = hash
+		hashes[name] = hash
 	}
 
 	return hashes, nil

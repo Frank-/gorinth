@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Frank-/gorinth/internal/tui"
+
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -58,15 +59,15 @@ func (base *sftpBase) RenameMod(oldName, newName string) error {
 	return base.sftpClient.Rename(oldPath, newPath)
 }
 
-func (fs *SFTPFS) CleanupTmpFiles() error {
-	files, err := fs.sftpClient.ReadDir(fs.BaseDir)
+func (base *sftpBase) CleanupTmpFiles() error {
+	files, err := base.sftpClient.ReadDir(base.BaseDir)
 	if err != nil {
 		return err
 	}
 
 	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".gorinth-tmp") {
-			fs.DeleteMod(file.Name())
+		if !file.IsDir() && strings.HasSuffix(file.Name(), TmpFileSuffix) {
+			base.DeleteMod(file.Name())
 		}
 	}
 	return nil
@@ -74,6 +75,9 @@ func (fs *SFTPFS) CleanupTmpFiles() error {
 
 // Close the SFTP and SSH connections when done
 func (base *sftpBase) Close() error {
+	// Clean up temp files too
+	base.CleanupTmpFiles()
+
 	base.sftpClient.Close()
 	return base.sshClient.Close()
 }

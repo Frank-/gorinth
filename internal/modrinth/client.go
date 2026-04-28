@@ -11,13 +11,6 @@ import (
 	"time"
 )
 
-const (
-	baseAPI          = "https://api.modrinth.com/v2"
-	updateURL        = baseAPI + "/version_files/update"
-	versionsFilesURL = baseAPI + "/version_files"
-	projectsURL      = baseAPI + "/projects?ids=%s"
-)
-
 type UpdateRequest struct {
 	Hashes       []string `json:"hashes"`
 	Algorithm    string   `json:"algorithm"`
@@ -59,6 +52,7 @@ type Version struct {
 type Client struct {
 	httpClient *http.Client
 	userAgent  string
+	BaseUrl    string
 }
 
 // Initialise a new Modrinth API client
@@ -67,6 +61,7 @@ func NewClient(githubUser, projectName, version string) *Client {
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		// Modrinth requires a user agent for API requests, so we include the GitHub repo and version for transparency
 		userAgent: fmt.Sprintf("%s/%s (%s)", githubUser, projectName, version),
+		BaseUrl:   "https://api.modrinth.com/v2",
 	}
 }
 
@@ -115,8 +110,10 @@ func (c *Client) CheckForUpdates(ctx context.Context, hashes []string, mcVersion
 		GameVersions: []string{mcVersion},
 	}
 
+	url := fmt.Sprintf("%s/version_files/update", c.BaseUrl)
+
 	var result map[string]Version
-	err := c.do(ctx, "POST", updateURL, reqBody, &result)
+	err := c.do(ctx, "POST", url, reqBody, &result)
 	return result, err
 }
 
@@ -133,7 +130,8 @@ func (c *Client) CheckVersionsFromHashes(ctx context.Context, hashes []string) (
 	}
 
 	var result map[string]Version
-	err := c.do(ctx, "POST", versionsFilesURL, reqBody, &result)
+	url := fmt.Sprintf("%s/version_files", c.BaseUrl)
+	err := c.do(ctx, "POST", url, reqBody, &result)
 
 	return result, err
 
@@ -146,7 +144,7 @@ func (c *Client) GetProjects(projectIDs []string) (map[string]ModrinthProject, e
 
 	idBytes, _ := json.Marshal(projectIDs)
 	query := url.QueryEscape(string(idBytes))
-	reqUrl := fmt.Sprintf(projectsURL, query)
+	reqUrl := fmt.Sprintf("%s/projects?ids=%s", c.BaseUrl, query)
 
 	var result []ModrinthProject
 	err := c.do(context.Background(), "GET", reqUrl, nil, &result)

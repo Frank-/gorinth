@@ -31,7 +31,7 @@ func (fs *SSHFS) HashMod(filename string) (string, error) {
 	// TODO: Decide if we should check for the command
 	output, err := fs.runSafeCmd(10*time.Second, "sha1sum", path)
 	if err != nil {
-		return "", fmt.Errorf("failed to compute hash on server: %w", err)
+		return "", fmt.Errorf("failed to compute hash on server (output: %s): %w", output, err)
 	}
 
 	parts := strings.Fields(string(output))
@@ -83,7 +83,7 @@ func (fs *SSHFS) DownloadMod(url string, filename string) error {
 }
 
 func (fs *SSHFS) CleanupTmpFiles() error {
-	target := fs.BaseDir + "/*.gorinth-tmp"
+	target := fs.BaseDir + "/*" + TmpFileSuffix
 	_, err := fs.runSafeCmd(30*time.Second, "rm", "-f", target)
 	return err
 }
@@ -150,8 +150,9 @@ func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ...string) (
 	}
 	defer session.Close()
 
-	var stdoutBuf bytes.Buffer
+	var stdoutBuf, stderrBuf bytes.Buffer
 	session.Stdout = &stdoutBuf
+	session.Stderr = &stderrBuf
 
 	// Timeout wrapper for command execution
 	doneCh := make(chan error, 1)
@@ -166,7 +167,7 @@ func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ...string) (
 		return "", fmt.Errorf("command timed out and session was closed")
 	case err := <-doneCh:
 		if err != nil {
-			return "", fmt.Errorf("command execution failed: %w", err)
+			return stdoutBuf.String(), fmt.Errorf("command execution failed: %w (stderr: %s)", err, stderrBuf.String())
 		}
 		return stdoutBuf.String(), nil
 	}

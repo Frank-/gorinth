@@ -16,3 +16,5 @@ type FileSystem interface {
 	Backup(baseDirName string) (string, error)
 	Close() error
 }
+
+const TmpFileSuffix = ".gorinth-tmp"
