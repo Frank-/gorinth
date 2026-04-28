@@ -4,17 +4,19 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Frank-/gorinth/internal/modrinth"
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
+	"github.com/pterm/pterm"
 	"github.com/spf13/afero"
+	"github.com/spf13/cobra"
 )
 
 type GorinthState struct {
-	BaseFS              afero.Fs
-	RemoteFS            vfs.FileSystem
-	WorkingFS           vfs.FileSystem
+	TargetFS            vfs.FileSystem
 	StagingDir          string
 	Mods                []string
 	FilenameMapReversed map[string]string
@@ -26,21 +28,13 @@ type GorinthState struct {
 
 func FetchGorinthState(baseFS afero.Fs) (*GorinthState, error) {
 	state := &GorinthState{
-		BaseFS:              baseFS,
 		FilenameMapReversed: make(map[string]string),
 	}
 
 	/*
 	*	Initialize file system based on mode (local or sftp
 	 */
-	if err := state.connectFS(); err != nil {
-		return nil, err
-	}
-
-	/*
-	* Set up staging area for safe updates
-	 */
-	if err := state.setupWorkingFS(); err != nil {
+	if err := state.connectFS(baseFS); err != nil {
 		return nil, err
 	}
 
@@ -61,26 +55,11 @@ func FetchGorinthState(baseFS afero.Fs) (*GorinthState, error) {
 	return state, nil
 }
 
-func (state *GorinthState) getFS() (vfs.FileSystem, error) {
-	var fs vfs.FileSystem
-	var err error
-	switch AppConfig.Mode {
-	case "local":
-		fs, err = vfs.NewLocalFS(AppConfig.ModsDir, state.BaseFS)
-	case "sftp":
-		fs, err = vfs.NewSFTPFS(AppConfig.Host, AppConfig.Port, AppConfig.User, AppConfig.Password, AppConfig.ModsDir)
-	default:
-		tui.Logger.Fatal("Invalid mode specified", "mode", AppConfig.Mode)
-	}
-
-	return fs, err
-}
-
-func (state *GorinthState) connectFS() error {
+func (state *GorinthState) connectFS(baseFS afero.Fs) error {
 	spinner, _ := tui.StartSpinner(fmt.Sprintf("Connecting to %s...", AppConfig.Mode))
 
 	var err error
-	state.RemoteFS, err = state.getFS()
+	state.TargetFS, err = connectAndMount(baseFS)
 
 	if err != nil {
 		spinner.Fail("Failed to connect")
@@ -91,58 +70,24 @@ func (state *GorinthState) connectFS() error {
 	return nil
 }
 
-func (state *GorinthState) setupWorkingFS() error {
-	// Use direct streaming
-	if AppConfig.Mode == "local" || AppConfig.Direct {
-		state.WorkingFS = state.RemoteFS
-		if AppConfig.Mode == "local" {
-			tui.Logger.Info("Running in Local mode (bypassing staging cache)")
-		} else {
-			tui.Logger.Info("Running in Direct stream mode (bypassing staging cache)")
-		}
-		return nil
-	}
-
-	spinner, _ := tui.StartSpinner("Setting up staging area...")
-
-	tmpDir, err := os.MkdirTemp("", "gorinth-staging-*")
-	if err != nil {
-		spinner.Fail("Failed to create staging area")
-		return fmt.Errorf("failed to create staging area: %w", err)
-	}
-
-	state.StagingDir = tmpDir
-
-	// Use RemoteFS to sync mods to staging area
-	if err := state.RemoteFS.SyncToDir(tmpDir); err != nil {
-		spinner.Fail("Failed to sync mods to staging area")
-		return fmt.Errorf("failed to sync mods to staging area: %w", err)
-	}
-
-	// Set WorkingFS to a new LocalFS pointing to the staging directory
-	state.WorkingFS, err = vfs.NewLocalFS(tmpDir, state.BaseFS)
-	if err != nil {
-		spinner.Fail("Failed to initialize staging file system")
-		return fmt.Errorf("failed to initialize staging file system: %w", err)
-	}
-
-	spinner.Success("Staging area ready!")
-	return nil
-}
-
 func (state *GorinthState) computedHashes() error {
 	spinner, _ := tui.StartSpinner("Scanning mods directory..")
 
 	var err error
-	state.Mods, err = state.WorkingFS.ListMods()
+	state.Mods, err = state.TargetFS.ListMods()
 	if err != nil {
 		spinner.Fail("Failed to list mods")
-		tui.Logger.Fatal("Error listing mods", "error", err)
+		return fmt.Errorf("failed to list mods: %w", err)
 	}
 	spinner.Success(fmt.Sprintf("Found %d .jar files", len(state.Mods)))
+
 	spinner, _ = tui.StartSpinner("Computing SHA-1 hashes...")
 
-	hashes, err := state.WorkingFS.HashMods()
+	hashes, err := state.TargetFS.HashMods()
+	if err != nil {
+		spinner.Fail("Failed to compute hashes")
+		return fmt.Errorf("failed to compute mod hashes: %w", err)
+	}
 
 	state.FilenameMapReversed = hashes
 	spinner.Success(fmt.Sprintf("Hashed %d mods", len(state.FilenameMapReversed)))
@@ -171,13 +116,13 @@ func (state *GorinthState) fetchModrinthData() error {
 	state.CurrentVersions, err = client.CheckVersionsFromHashes(context.Background(), hashList)
 	if err != nil {
 		spinner.Fail("Failed to check current versions")
-		tui.Logger.Fatal("Error checking for current versions", "error", err)
+		return fmt.Errorf("failed to check current versions: %w", err)
 	}
 
 	state.Updates, err = client.CheckForUpdates(context.Background(), hashList, AppConfig.GameVersion, AppConfig.Loader)
 	if err != nil {
 		spinner.Fail("Failed to check for updates")
-		tui.Logger.Fatal("Error checking for updates", "error", err)
+		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 
 	spinner.Success("Modrinth API query successful!")
@@ -199,10 +144,52 @@ func (state *GorinthState) fetchModrinthData() error {
 	state.Projects, err = client.GetProjects(projectIDs)
 	if err != nil {
 		spinner.Fail("Failed to fetch mod names")
-		tui.Logger.Fatal("Error fetching mod names", "error", err)
+		return fmt.Errorf("failed to fetch mod names: %w", err)
 	} else {
 		spinner.Success("Fetched mod details successfully!")
 	}
 
 	return nil
+}
+
+func WithGorinthState(action func(cmd *cobra.Command, args []string, state *GorinthState) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		// Create a context that we can use to manage cancellation and timeouts if needed
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+		go func() {
+			select {
+			case <-sigCh:
+				fmt.Print("\r\033[K")
+				pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
+				stop()
+			case <-ctx.Done():
+				// Normal context cancellation, no need to print anything
+				return
+			}
+		}()
+
+		// initialize appFS for the state fetcher
+		appFS := afero.NewOsFs()
+
+		// Safely fetch state
+		state, err := FetchGorinthState(appFS)
+		if err != nil {
+			return err
+		}
+
+		// Guarantee cleanup of resources after action completes
+		defer func() {
+			if state.TargetFS != nil {
+				state.TargetFS.CleanupTmpFiles()
+				state.TargetFS.Close()
+			}
+		}()
+
+		return action(cmd, args, state)
+	}
 }

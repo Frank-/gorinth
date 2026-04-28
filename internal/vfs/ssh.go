@@ -82,6 +82,12 @@ func (fs *SSHFS) DownloadMod(url string, filename string) error {
 	return nil
 }
 
+func (fs *SSHFS) CleanupTmpFiles() error {
+	target := fs.BaseDir + "/*.gorinth-tmp"
+	_, err := fs.runSafeCmd(30*time.Second, "rm", "-f", target)
+	return err
+}
+
 func (fs *SSHFS) Backup(baseDirName string) (string, error) {
 	timestamp := time.Now().Format("2006-01-02_150405")
 	parentDir := filepath.Dir(fs.BaseDir)

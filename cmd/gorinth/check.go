@@ -2,10 +2,7 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 	"sort"
-	"syscall"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pterm/pterm"
@@ -16,45 +13,8 @@ var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check for updates to your Minecraft server mods without applying them.",
 	Long:  `The check command allows you to see if there are any updates available for your Minecraft server mods without actually downloading or applying them. This is useful for planning updates and ensuring compatibility before making changes to your server.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: WithGorinthState(func(cmd *cobra.Command, args []string, state *GorinthState) error {
 		tui.Logger.Infof("Starting Gorinth in %s mode", AppConfig.Mode)
-
-		var state *GorinthState
-
-		// Listen for interrupt signals to allow graceful shutdown during the update process
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-		// Start a goroutine to handle interrupts and perform cleanup
-		go func() {
-			<-sigCh
-			fmt.Print("\r\033[K")
-			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
-
-			if state != nil && state.RemoteFS != nil {
-				state.RemoteFS.Close()
-				pterm.Success.Println("Cleanup complete. Exiting.")
-			} else {
-				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
-			}
-			os.Exit(1)
-		}()
-
-		var err error
-		state, err = FetchGorinthState()
-
-		if err != nil {
-			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
-		}
-
-		defer func() {
-			if state.StagingDir != "" {
-				os.RemoveAll(state.StagingDir)
-			}
-			if state.RemoteFS != nil {
-				state.RemoteFS.Close()
-			}
-		}()
 
 		// Initialise table with header
 		tableData := pterm.TableData{buildTableHeader()}
@@ -92,10 +52,10 @@ var checkCmd = &cobra.Command{
 			}
 		}
 
-		err = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+		err := pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 		if err != nil {
 			tui.Logger.Error("Error rendering table", "error", err)
 		}
-
-	},
+		return nil
+	}),
 }

@@ -2,11 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
-	"syscall"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pterm/pterm"
@@ -26,45 +23,8 @@ var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Check for updates and apply them to your Minecraft server mods.",
 	Long:  `The update command checks for available updates for your Minecraft server mods and applies them automatically. This command will download the latest versions of your mods from Modrinth and replace the old versions in your server's mod directory, ensuring that your server is always running the most up-to-date mods.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: WithGorinthState(func(cmd *cobra.Command, args []string, state *GorinthState) error {
 		tui.Logger.Infof("Starting Gorinth Update in %s mode", AppConfig.Mode)
-
-		var state *GorinthState
-
-		// Listen for interrupt signals to allow graceful shutdown during the update process
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-		// Start a goroutine to handle interrupts and perform cleanup
-		go func() {
-			<-sigCh
-			fmt.Print("\r\033[K")
-			pterm.Warning.Println("\nProcess interrupted by user! Cleaning up server connections...")
-
-			if state != nil && state.RemoteFS != nil {
-				state.RemoteFS.Close()
-				pterm.Success.Println("Cleanup complete. Exiting.")
-			} else {
-				tui.Logger.Warn("Gorinth state not fully initialized, skipping cleanup")
-			}
-			os.Exit(1)
-		}()
-
-		var err error
-		state, err = FetchGorinthState()
-
-		if err != nil {
-			tui.Logger.Fatal("Failed to fetch Gorinth state", "error", err)
-		}
-
-		defer func() {
-			if state.StagingDir != "" {
-				os.RemoveAll(state.StagingDir)
-			}
-			if state.RemoteFS != nil {
-				state.RemoteFS.Close()
-			}
-		}()
 
 		var tasks []UpdateTask
 		var brokenMods []string
@@ -160,12 +120,12 @@ var updateCmd = &cobra.Command{
 				}
 			}
 
-			err = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+			_ = pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 
 			if !AppConfig.Force {
 				pterm.Error.Printfln("Update aborted! %d mods are incompatible with %s and have no updates.", len(brokenMods), AppConfig.GameVersion)
 				pterm.Warning.Printfln("Continuing would break your server. Use --force to bypass this check (not recommended).")
-				return
+				return nil
 			} else {
 				pterm.Warning.Printfln("DANGER: Force flag detected. Proceeding with update despite %d incompatible mods.", len(brokenMods))
 				pterm.Info.Printfln("A backup will be created before any files are modified so you can roll back if the server crashes.")
@@ -175,7 +135,7 @@ var updateCmd = &cobra.Command{
 
 		if len(tasks) == 0 {
 			tui.Logger.Info("All mods are up to date! Nothing to do.")
-			return
+			return nil
 		}
 
 		pterm.Info.Printfln("Found %d mods with updates available. Starting update process...", len(tasks))
@@ -210,17 +170,17 @@ var updateCmd = &cobra.Command{
 			spinner, _ := tui.StartSpinner(updateText)
 
 			tmpName := task.NewFilename + ".tmp"
-			if err := state.RemoteFS.DownloadMod(task.DownloadURL, tmpName); err != nil {
+			if err := state.TargetFS.DownloadMod(task.DownloadURL, tmpName); err != nil {
 				spinner.Fail("Download failed")
 				tui.Logger.Error("Failed to download mod update", "mod", task.NewFilename, "error", err)
 				continue
 			}
 
-			if err := state.RemoteFS.DeleteMod(task.OldFilename); err != nil {
+			if err := state.TargetFS.DeleteMod(task.OldFilename); err != nil {
 				tui.Logger.Error("Failed to delete old mod", "mod", task.OldFilename, "error", err)
 			}
 
-			if err := state.RemoteFS.Rename(tmpName, task.NewFilename); err != nil {
+			if err := state.TargetFS.RenameMod(tmpName, task.NewFilename); err != nil {
 				spinner.Fail("Failed to finalize file name")
 				tui.Logger.Error("Failed to rename new mod", "mod", task.NewFilename, "error", err)
 				continue
@@ -241,7 +201,8 @@ var updateCmd = &cobra.Command{
 			pterm.Warning.Printfln("%d incompatible mod(s) were left untouched to prevent immediate server crashes.", len(brokenMods))
 		}
 
-	},
+		return nil
+	}),
 }
 
 func (state *GorinthState) performBackup() error {
@@ -249,7 +210,7 @@ func (state *GorinthState) performBackup() error {
 
 	realName := filepath.Base(AppConfig.ModsDir)
 
-	backupPath, err := state.WorkingFS.Backup(realName)
+	backupPath, err := state.TargetFS.Backup(realName)
 	if err != nil {
 		spinner.Fail("Failed to create backup")
 		return err

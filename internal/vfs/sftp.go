@@ -1,25 +1,27 @@
 package vfs
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pkg/sftp"
+	"github.com/spf13/afero"
 	"golang.org/x/crypto/ssh"
 )
 
 type SFTPFS struct {
 	sftpBase
+	localCacheDir string
+	appFS         afero.Fs
 }
 
 // Create a new SFTPFS instance
-func NewSFTPFS(sshClient *ssh.Client, sftpClient *sftp.Client, dir string) (*SFTPFS, error) {
+func NewSFTPFS(sshClient *ssh.Client, sftpClient *sftp.Client, dir string, afs afero.Fs) (*SFTPFS, error) {
 
 	return &SFTPFS{
 		sftpBase: sftpBase{
@@ -27,11 +29,27 @@ func NewSFTPFS(sshClient *ssh.Client, sftpClient *sftp.Client, dir string) (*SFT
 			sftpClient: sftpClient,
 			sshClient:  sshClient,
 		},
+		appFS: afs,
 	}, nil
 }
 
-// Stream the file from SFTP and compute its SHA1 hash without loading the entire file into memory
-func (fs *SFTPFS) HashMod(filename string) (string, error) {
+func (fs *SFTPFS) ensureCache() error {
+	if fs.localCacheDir != "" {
+		return nil
+	}
+
+	tempDir, err := afero.TempDir(fs.appFS, "", "gorinth-sftp-cache-*")
+	if err != nil {
+		return err
+	}
+
+	fs.localCacheDir = tempDir
+	return fs.SyncToDir(fs.localCacheDir)
+}
+
+// // Stream the file from SFTP and compute its SHA1 hash without loading the entire file into memory
+// // TODO: Change to hash remotemod as a standalone command
+func (fs *SFTPFS) HashRemoteMod(filename string) (string, error) {
 	path := filepath.ToSlash(filepath.Join(fs.BaseDir, filename))
 	file, err := fs.sftpClient.Open(path)
 	if err != nil {
@@ -39,33 +57,19 @@ func (fs *SFTPFS) HashMod(filename string) (string, error) {
 	}
 	defer file.Close()
 
-	hash := sha1.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return computeHash(file)
 }
 
 func (fs *SFTPFS) HashMods() (map[string]string, error) {
-	hashes := make(map[string]string)
-
-	mods, err := fs.ListMods()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list mods: %w", err)
+	// Ensure we have a local cache of the mods to avoid multiple round-trips to the server when hashing multiple files
+	if err := fs.ensureCache(); err != nil {
+		return nil, err
 	}
 
-	for _, mod := range mods {
-		hash, err := fs.HashMod(mod)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash mod '%s': %w", mod, err)
-		}
-		hashes[mod] = hash
-	}
-
-	return hashes, nil
+	return hashLocalDirectory(fs.appFS, fs.localCacheDir)
 }
 
+// Download a mod from a URL and save it directly to the SFTP server without storing it locally first
 func (fs *SFTPFS) DownloadMod(url string, targetFilename string) error {
 	destPath := filepath.ToSlash(filepath.Join(fs.BaseDir, targetFilename))
 
@@ -85,6 +89,7 @@ func (fs *SFTPFS) DownloadMod(url string, targetFilename string) error {
 	return err
 }
 
+// Sync the mods from the SFTP server to a local directory
 func (fs *SFTPFS) SyncToDir(dest string) error {
 	mods, err := fs.ListMods()
 	if err != nil {
@@ -119,21 +124,33 @@ func (fs *SFTPFS) SyncToDir(dest string) error {
 }
 
 func (fs *SFTPFS) Backup(baseDirName string) (string, error) {
-	// timestamp := time.Now().Format("2006-01-02_150405")
+	// Ensure we have a local cache of the mods. This should already exist if hashmods has already run
+	if err := fs.ensureCache(); err != nil {
+		return "", fmt.Errorf("failed to ensure local cache for backup: %w", err)
+	}
+	tui.Logger.Info("Creating backup of mods directory...")
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	zipFileName := fmt.Sprintf("%s_backup_%s.zip", baseDirName, timestamp)
 
-	/*
-	* Local zip backup
-	 */
+	// Create backup directory
+	backupDir := "backups"
+	fs.appFS.MkdirAll(backupDir, os.ModePerm)
 
-	mods, err := fs.ListMods()
+	destZipPath := filepath.Join(backupDir, zipFileName)
+
+	err := zipLocalDirectory(fs.appFS, fs.localCacheDir, destZipPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to list mods for backup: %w", err)
+		return "", fmt.Errorf("failed to create backup zip: %w", err)
 	}
 
-	tui.Logger.Debug("Creating local zip backup of mods", "modCount", len(mods))
-	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
-		path := filepath.ToSlash(filepath.Join(fs.BaseDir, mod))
-		return fs.sftpClient.Open(path)
-	})
+	// return absolute path to the created zip file
+	return filepath.Abs(destZipPath)
+}
 
+// Clean up any temporary files created for caching or backup when we close the SFTPFS instance
+func (fs *SFTPFS) Close() error {
+	if fs.localCacheDir != "" {
+		fs.appFS.RemoveAll(fs.localCacheDir)
+	}
+	return fs.sftpBase.Close()
 }

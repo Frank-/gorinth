@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
@@ -22,9 +23,11 @@ func connectAndMount(baseFS afero.Fs) (vfs.FileSystem, error) {
 			ssh.Password(AppConfig.Password),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
 	}
 
 	address := fmt.Sprintf("%s:%d", AppConfig.Host, AppConfig.Port)
+	tui.Logger.Debug("Connecting to SSH server", "address", address)
 	sshClient, err := ssh.Dial("tcp", address, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to SSH server: %w", err)
@@ -40,5 +43,5 @@ func connectAndMount(baseFS afero.Fs) (vfs.FileSystem, error) {
 		return vfs.NewSSHFS(sshClient, sftpClient, AppConfig.ModsDir)
 	}
 
-	return vfs.NewSFTPFS(sshClient, sftpClient, AppConfig.ModsDir)
+	return vfs.NewSFTPFS(sshClient, sftpClient, AppConfig.ModsDir, baseFS)
 }

@@ -1,13 +1,13 @@
 package vfs
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/spf13/afero"
@@ -15,7 +15,7 @@ import (
 
 type LocalFS struct {
 	BaseDir string
-	AppFS   afero.Fs
+	appFS   afero.Fs
 }
 
 func NewLocalFS(dir string, afs afero.Fs) (*LocalFS, error) {
@@ -34,13 +34,13 @@ func NewLocalFS(dir string, afs afero.Fs) (*LocalFS, error) {
 	}
 	return &LocalFS{
 		BaseDir: dir,
-		AppFS:   afs,
+		appFS:   afs,
 	}, nil
 }
 
 func (fs *LocalFS) ListMods() ([]string, error) {
 	var mods []string
-	entries, err := afero.ReadDir(fs.AppFS, fs.BaseDir)
+	entries, err := afero.ReadDir(fs.appFS, fs.BaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -54,53 +54,20 @@ func (fs *LocalFS) ListMods() ([]string, error) {
 	return mods, nil
 }
 
-func (fs *LocalFS) HashMod(filename string) (string, error) {
-	path := filepath.Join(fs.BaseDir, filename)
-	file, err := fs.AppFS.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := sha1.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	// Modrinth expects the hash to be in hex format
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
 func (fs *LocalFS) HashMods() (map[string]string, error) {
-	hashes := make(map[string]string)
-
-	mods, err := fs.ListMods()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list mods: %w", err)
-	}
-
-	for _, mod := range mods {
-		hash, err := fs.HashMod(mod)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash mod '%s': %w", mod, err)
-		}
-
-		hashes[mod] = hash
-	}
-
-	return hashes, nil
+	return hashLocalDirectory(fs.appFS, fs.BaseDir)
 }
 
 func (fs *LocalFS) DeleteMod(filename string) error {
 	path := filepath.Join(fs.BaseDir, filename)
-	return fs.AppFS.Remove(path)
+	return fs.appFS.Remove(path)
 }
 
 func (fs *LocalFS) WriteMod(filename string, data io.Reader) error {
 	path := filepath.Join(fs.BaseDir, filename)
 
 	// Create new file
-	file, err := fs.AppFS.Create(path)
+	file, err := fs.appFS.Create(path)
 	if err != nil {
 		return err
 	}
@@ -111,10 +78,10 @@ func (fs *LocalFS) WriteMod(filename string, data io.Reader) error {
 	return err
 }
 
-func (fs *LocalFS) Rename(oldName, newName string) error {
+func (fs *LocalFS) RenameMod(oldName, newName string) error {
 	oldPath := filepath.Join(fs.BaseDir, oldName)
 	newPath := filepath.Join(fs.BaseDir, newName)
-	return fs.AppFS.Rename(oldPath, newPath)
+	return fs.appFS.Rename(oldPath, newPath)
 }
 
 func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
@@ -129,7 +96,7 @@ func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
 	}
 
 	destPath := filepath.Join(fs.BaseDir, targetFilename)
-	file, err := fs.AppFS.Create(destPath)
+	file, err := fs.appFS.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create mod file: %w", err)
 	}
@@ -139,51 +106,39 @@ func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
 	return err
 }
 
-func (fs *LocalFS) SyncToDir(dest string) error {
-	mods, err := fs.ListMods()
+func (fs *LocalFS) CleanupTmpFiles() error {
+	files, err := afero.ReadDir(fs.appFS, fs.BaseDir)
 	if err != nil {
-		return fmt.Errorf("failed to list mods for syncing: %w", err)
+		return err
 	}
 
-	for _, mod := range mods {
-		srcPath := filepath.Join(fs.BaseDir, mod)
-		destPath := filepath.Join(dest, mod)
-
-		srcFile, err := fs.AppFS.Open(srcPath)
-		if err != nil {
-			return fmt.Errorf("failed to open source mod file '%s': %w", srcPath, err)
-		}
-
-		destFile, err := fs.AppFS.Create(destPath)
-		if err != nil {
-			srcFile.Close()
-			return fmt.Errorf("failed to create destination mod file '%s': %w", destPath, err)
-		}
-
-		_, err = io.Copy(destFile, srcFile)
-		srcFile.Close()
-		destFile.Close()
-
-		if err != nil {
-			return fmt.Errorf("failed to copy mod file '%s' to '%s': %w", srcPath, destPath, err)
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".gorinth-tmp") {
+			path := filepath.Join(fs.BaseDir, f.Name())
+			fs.appFS.Remove(path)
 		}
 	}
-
 	return nil
 }
 
 func (fs *LocalFS) Backup(baseDirName string) (string, error) {
 	tui.Logger.Info("Creating backup of local mods directory...")
-	mods, err := fs.ListMods()
+
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	zipFileName := fmt.Sprintf("%s_backup_%s.zip", baseDirName, timestamp)
+
+	// Create backup directory
+	backupDir := "backups"
+	fs.appFS.MkdirAll(backupDir, os.ModePerm)
+	destZipPath := filepath.Join(backupDir, zipFileName)
+
+	err := zipLocalDirectory(fs.appFS, fs.BaseDir, destZipPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read mods directory: %w", err)
+		return "", fmt.Errorf("failed to create backup zip: %w", err)
 	}
 
-	// baseDirName := filepath.Base(fs.BaseDir)
-	tui.Logger.Debug("Backing up mods", "modCount", len(mods), "baseDir", baseDirName)
-	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
-		return fs.AppFS.Open(filepath.Join(fs.BaseDir, mod))
-	})
+	// Return absolute path to the created zip file
+	return filepath.Abs(destZipPath)
 }
 
 func (fs *LocalFS) Close() error {

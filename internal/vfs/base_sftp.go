@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -19,6 +20,7 @@ type sftpBase struct {
 
 func (base *sftpBase) ListMods() ([]string, error) {
 	var mods []string
+	tui.Logger.Debug("Listing mods in remote directory", "directory", base.BaseDir)
 	entries, err := base.sftpClient.ReadDir(base.BaseDir)
 	if err != nil {
 		return nil, err
@@ -50,10 +52,24 @@ func (base *sftpBase) DeleteMod(filename string) error {
 	return base.sftpClient.Remove(path)
 }
 
-func (base *sftpBase) Rename(oldName, newName string) error {
+func (base *sftpBase) RenameMod(oldName, newName string) error {
 	oldPath := filepath.ToSlash(filepath.Join(base.BaseDir, oldName))
 	newPath := filepath.ToSlash(filepath.Join(base.BaseDir, newName))
 	return base.sftpClient.Rename(oldPath, newPath)
+}
+
+func (fs *SFTPFS) CleanupTmpFiles() error {
+	files, err := fs.sftpClient.ReadDir(fs.BaseDir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".gorinth-tmp") {
+			fs.DeleteMod(file.Name())
+		}
+	}
+	return nil
 }
 
 // Close the SFTP and SSH connections when done

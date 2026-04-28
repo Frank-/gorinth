@@ -57,7 +57,6 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	setupFlags()
-	// setupConfig()
 
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(updateCmd)
@@ -69,6 +68,7 @@ func setupConfig() {
 		viper.SetConfigFile(cfgFile)
 	}
 
+	viper.AddConfigPath(".")
 	viper.SetConfigType("yaml")
 
 	// Read from environment variables
@@ -93,10 +93,10 @@ func setupFlags() {
 	flags.String("host", "localhost", "SFTP host for remote server")
 	flags.IntP("port", "p", 22, "SFTP port for remote server")
 	flags.StringP("user", "u", "user", "SFTP username for remote server")
-	flags.String("spassword", "password", "SFTP password for remote server")
+	flags.String("password", "password", "SFTP password for remote server")
 
 	// Directory
-	flags.String("dir", ".", "Directory to store mods")
+	flags.String("mods-dir", "mods", "Directory to store mods")
 
 	// Minecraft version and loader
 	flags.String("game-version", "1.20.4", "Minecraft version to check for updates")
