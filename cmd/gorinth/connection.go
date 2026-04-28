@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/Frank-/gorinth/internal/ssh"
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
 	"github.com/pkg/sftp"

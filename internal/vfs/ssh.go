@@ -3,15 +3,16 @@ package vfs
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
 type SSHFS struct {
+	sftpBase
 	BaseDir    string
 	sshClient  *ssh.Client
 	sftpClient *sftp.Client
@@ -47,26 +48,27 @@ func (fs *SSHFS) DownloadMod(url string, filename string) error {
 }
 
 func (fs *SSHFS) Backup(baseDirName string) (string, error) {
-		parentDir := filepath.Dir(fs.BaseDir)
-		tarFileName := fmt.Sprintf("%s_backup_%s.tar", baseDirName, timestamp)
-		tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
+	timestamp := time.Now().Format("2006-01-02_150405")
+	parentDir := filepath.Dir(fs.BaseDir)
+	tarFileName := fmt.Sprintf("%s_backup_%s.tar", baseDirName, timestamp)
+	tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
 
-		_, err := fs.runSafeCmd(30*time.Second, "tar", "-cf", tarPath, "-C", parentDir, baseDirName)
-		if err != nil {
-			return "", fmt.Errorf("failed to create backup tarball: %w", err)
-		}
-		
-		return tarPath, nil
+	_, err := fs.runSafeCmd(30*time.Second, "tar", "-cf", tarPath, "-C", parentDir, baseDirName)
+	if err != nil {
+		return "", fmt.Errorf("failed to create backup tarball: %w", err)
+	}
+
+	return tarPath, nil
 
 }
 
-func (fs *SFTPFS) determineDownloadMethod(client *ssh.Client) string {
-	_, err := runSafeCmd(2*time.Second, "command", "-v", "curl")
+func (fs *SSHFS) determineDownloadMethod(client *ssh.Client) string {
+	_, err := fs.runSafeCmd(2*time.Second, "command", "-v", "curl")
 	if err == nil {
 		return "curl"
 	}
 
-	_, err = runSafeCmd(2*time.Second, "command", "-v", "wget")
+	_, err = fs.runSafeCmd(2*time.Second, "command", "-v", "wget")
 	if err == nil {
 		return "wget"
 	}
@@ -75,7 +77,7 @@ func (fs *SFTPFS) determineDownloadMethod(client *ssh.Client) string {
 }
 
 // runSafeCmd executes a command on the SSH server with a timeout, ensuring that the session is properly closed if the command takes too long. It also escapes all arguments to prevent injection issues.
-func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ..string) (string, error) {
+func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ...string) (string, error) {
 	// Construct a safe command by escaping all arguments
 	var safeCmdBuilder strings.Builder
 	safeCmdBuilder.WriteString(cmd)
@@ -83,13 +85,13 @@ func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ..string) (s
 		safeCmdBuilder.WriteString(" " + escapeArg(arg))
 	}
 	finalCmd := safeCmdBuilder.String()
-	
+
 	// Timeout on session creation
 	sessionCh := make(chan *ssh.Session, 1)
 	errCh := make(chan error, 1)
 
 	go func() {
-		s, err := fs.sftpClient.NewSession()
+		s, err := fs.sshClient.NewSession()
 		if err != nil {
 			errCh <- err
 			return
@@ -113,7 +115,7 @@ func (fs *SSHFS) runSafeCmd(timeout time.Duration, cmd string, args ..string) (s
 	// Timeout wrapper for command execution
 	doneCh := make(chan error, 1)
 	go func() {
-		doneCh <- session.Run(cmd)
+		doneCh <- session.Run(finalCmd)
 	}()
 
 	select {

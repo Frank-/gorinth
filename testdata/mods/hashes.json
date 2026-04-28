@@ -1,0 +1,54 @@
+[
+  {
+    "hash": "f35f95c653c0ec99fa2aa5f993306922d00e59e9",
+    "filename": "alternate-current-mc1.21.11-1.9.0.jar"
+  },
+  {
+    "hash": "3cdae64ccd748fb7bb4cc66b86d809a6e786771d",
+    "filename": "automodpack-mc1.21.11-fabric-4.0.5.jar"
+  },
+  {
+    "hash": "587f9a3d9e4591e8e1a1c3eda61ed2f7bfa5dc46",
+    "filename": "c2me-fabric-mc1.21.11-0.3.6.0.0.jar"
+  },
+  {
+    "hash": "626fde9e970030cfc8cb64cd0a1abfc03d37ecc2",
+    "filename": "Clumps-fabric-1.21.11-29.0.0.1.jar"
+  },
+  {
+    "hash": "2ba7d25b312c09b4b1ad821b42526b8b33652740",
+    "filename": "disconnect-packet-fix-fabric-2.0.0.jar"
+  },
+  {
+    "hash": "9c97e5eab78fa8dd176e0f62f00db3e266c468ae",
+    "filename": "DistantHorizons-2.4.5-b-1.21.11-fabric-neoforge.jar"
+  },
+  {
+    "hash": "50de67eb221f0b38216da8668b09ca311327040e",
+    "filename": "fabric-api-0.141.3+1.21.11.jar"
+  },
+  {
+    "hash": "c2e2f5e008f5bc9f401dfad8ca94909917006b65",
+    "filename": "ferritecore-8.2.0-fabric.jar"
+  },
+  {
+    "hash": "94ddaeeae6ca7fecc79e54a0aa02a5438a775a99",
+    "filename": "krypton-0.2.10.jar"
+  },
+  {
+    "hash": "7733e091bebe5f68aaa4e13cfb6f1eaf3a192379",
+    "filename": "lithium-fabric-0.21.3+mc1.21.11.jar"
+  },
+  {
+    "hash": "b9edf3b37b76653c98d096962ae0d76c96eab2c2",
+    "filename": "packetfixer-fabric-3.3.4-1.21.11.jar"
+  },
+  {
+    "hash": "9df93ab6442fa374c17fab6b5181fe2c215d9d5b",
+    "filename": "ScalableLux-0.1.6+fabric.c25518a-all.jar"
+  },
+  {
+    "hash": "1bb1f8ade981e1e388cb9f114fa515c2294e0019",
+    "filename": "worldedit-mod-7.4.0.jar"
+  }
+]

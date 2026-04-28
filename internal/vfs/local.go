@@ -6,34 +6,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/Frank-/gorinth/internal/tui"
+	"github.com/spf13/afero"
 )
 
 type LocalFS struct {
 	BaseDir string
+	AppFS   afero.Fs
 }
 
-func NewLocalFS(dir string) (*LocalFS, error) {
-	info, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("mod directory does not exist: %s", dir)
-	}
+func NewLocalFS(dir string, afs afero.Fs) (*LocalFS, error) {
+	// info, err := fs.Stat(dir)
+	exists, err := afero.Exists(afs, dir)
 	if err != nil {
-		return nil, fmt.Errorf("error accessing mod directory: %w", err)
+		return nil, fmt.Errorf("error checking directory: %w", err)
 	}
+	if !exists {
+		return nil, fmt.Errorf("mods directory does not exist: %s", dir)
+	}
+
+	info, err := afs.Stat(dir)
 	if !info.IsDir() {
-		return nil, fmt.Errorf("mod path is not a directory: %s", dir)
+		return nil, fmt.Errorf("path is not a directory: %s", dir)
 	}
-	return &LocalFS{BaseDir: dir}, nil
+	return &LocalFS{
+		BaseDir: dir,
+		AppFS:   afs,
+	}, nil
 }
 
 func (fs *LocalFS) ListMods() ([]string, error) {
 	var mods []string
-	entries, err := os.ReadDir(fs.BaseDir)
+	entries, err := afero.ReadDir(fs.AppFS, fs.BaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +56,7 @@ func (fs *LocalFS) ListMods() ([]string, error) {
 
 func (fs *LocalFS) HashMod(filename string) (string, error) {
 	path := filepath.Join(fs.BaseDir, filename)
-	file, err := os.Open(path)
+	file, err := fs.AppFS.Open(path)
 	if err != nil {
 		return "", err
 	}
@@ -86,14 +93,14 @@ func (fs *LocalFS) HashMods() (map[string]string, error) {
 
 func (fs *LocalFS) DeleteMod(filename string) error {
 	path := filepath.Join(fs.BaseDir, filename)
-	return os.Remove(path)
+	return fs.AppFS.Remove(path)
 }
 
 func (fs *LocalFS) WriteMod(filename string, data io.Reader) error {
 	path := filepath.Join(fs.BaseDir, filename)
 
 	// Create new file
-	file, err := os.Create(path)
+	file, err := fs.AppFS.Create(path)
 	if err != nil {
 		return err
 	}
@@ -107,7 +114,7 @@ func (fs *LocalFS) WriteMod(filename string, data io.Reader) error {
 func (fs *LocalFS) Rename(oldName, newName string) error {
 	oldPath := filepath.Join(fs.BaseDir, oldName)
 	newPath := filepath.Join(fs.BaseDir, newName)
-	return os.Rename(oldPath, newPath)
+	return fs.AppFS.Rename(oldPath, newPath)
 }
 
 func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
@@ -122,7 +129,7 @@ func (fs *LocalFS) DownloadMod(url string, targetFilename string) error {
 	}
 
 	destPath := filepath.Join(fs.BaseDir, targetFilename)
-	file, err := os.Create(destPath)
+	file, err := fs.AppFS.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create mod file: %w", err)
 	}
@@ -142,12 +149,12 @@ func (fs *LocalFS) SyncToDir(dest string) error {
 		srcPath := filepath.Join(fs.BaseDir, mod)
 		destPath := filepath.Join(dest, mod)
 
-		srcFile, err := os.Open(srcPath)
+		srcFile, err := fs.AppFS.Open(srcPath)
 		if err != nil {
 			return fmt.Errorf("failed to open source mod file '%s': %w", srcPath, err)
 		}
 
-		destFile, err := os.Create(destPath)
+		destFile, err := fs.AppFS.Create(destPath)
 		if err != nil {
 			srcFile.Close()
 			return fmt.Errorf("failed to create destination mod file '%s': %w", destPath, err)
@@ -175,7 +182,7 @@ func (fs *LocalFS) Backup(baseDirName string) (string, error) {
 	// baseDirName := filepath.Base(fs.BaseDir)
 	tui.Logger.Debug("Backing up mods", "modCount", len(mods), "baseDir", baseDirName)
 	return createLocalZip(baseDirName, mods, func(mod string) (io.ReadCloser, error) {
-		return os.Open(filepath.Join(fs.BaseDir, mod))
+		return fs.AppFS.Open(filepath.Join(fs.BaseDir, mod))
 	})
 }
 
