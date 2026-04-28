@@ -16,17 +16,17 @@ import (
 
 type SFTPFS struct {
 	sftpBase
-	sshClient    *ssh.Client
-	sftpClient   *sftp.Client
-	downloadTool string // "curl" or "wget" or "sftp" fallback
 }
 
-// Create a new SSH connection and init SFTP client
-func NewSFTPFS(sshClient *ssh.Client, sftpClient *sftp.Client) (*SFTPFS, error) {
+// Create a new SFTPFS instance
+func NewSFTPFS(sshClient *ssh.Client, sftpClient *sftp.Client, dir string) (*SFTPFS, error) {
 
 	return &SFTPFS{
-		sshClient:  sshClient,
-		sftpClient: sftpClient,
+		sftpBase: sftpBase{
+			BaseDir:    dir,
+			sftpClient: sftpClient,
+			sshClient:  sshClient,
+		},
 	}, nil
 }
 
@@ -122,27 +122,6 @@ func (fs *SFTPFS) Backup(baseDirName string) (string, error) {
 	// timestamp := time.Now().Format("2006-01-02_150405")
 
 	/*
-	* Server-side backup using tar (if shell access is available)
-	 */
-
-	// if fs.hasShell {
-	// 	tui.Logger.Debug("Attempting server-side backup using tar", "baseDir", fs.BaseDir)
-
-	// 	parentDir := filepath.Dir(fs.BaseDir)
-	// 	tarFileName := fmt.Sprintf("%s_backup_%s.tar", baseDirName, timestamp)
-	// 	tarPath := filepath.ToSlash(filepath.Join(parentDir, tarFileName))
-
-	// 	// if session, err := fs.sshClient.NewSession(); err == nil {
-	// 	cmd := fmt.Sprintf("tar -cf '%s' -C '%s' '%s' >/dev/null 2>&1", tarPath, parentDir, baseDirName)
-	// 	_, err := runCmdWithTimeout(fs.sshClient, cmd, 30*time.Second)
-	// 	if err == nil {
-	// 		tui.Logger.Debug("Server-side tar backup successful", "tarPath", tarPath)
-	// 		return tarPath, nil
-	// 	}
-	// 	tui.Logger.Warn("Server-side tar backup failed, falling back to zip method", "error", err)
-	// }
-
-	/*
 	* Local zip backup
 	 */
 
@@ -158,160 +137,3 @@ func (fs *SFTPFS) Backup(baseDirName string) (string, error) {
 	})
 
 }
-
-// func shellProbe(sshClient *ssh.Client) bool {
-// 	resultCh := make(chan bool, 1)
-
-// 	go func() {
-// 		session, err := sshClient.NewSession()
-// 		if err != nil {
-// 			resultCh <- false
-// 			return
-// 		}
-// 		defer session.Close()
-
-// 		err = session.Run("echo gorinth-probe")
-// 		resultCh <- (err == nil)
-// 	}()
-
-// 	select {
-// 	case <-time.After(3 * time.Second):
-// 		tui.Logger.Debug("SSH shell probe timed out, assuming no shell access")
-// 		return false // Timeout, assume no shell access
-// 	case res := <-resultCh:
-// 		return res
-// 	}
-
-// }
-
-// func shellProbe(client *ssh.Client) bool {
-// 	probeStr := fmt.Sprintf("gorinth-probe-%d", time.Now().Unix())
-
-// 	out, err := runCmdWithTimeout(client, "echo "+probeStr, 3*time.Second)
-// 	if err != nil {
-// 		tui.Logger.Debug("SSH shell probe failed", "error", err)
-// 		return false
-// 	}
-
-// 	return strings.Contains(out, probeStr)
-// }
-
-// func (fs *SFTPFS) determineDownloadMethod(client *ssh.Client) string {
-// 	if !fs.hasShell {
-// 		return "sftp" // no shell access, must use sftp
-// 	}
-
-// 	_, err := runCmdWithTimeout(client, "command -v curl || which curl", 2*time.Second)
-// 	if err == nil {
-// 		return "curl"
-// 	}
-
-// 	_, err = runCmdWithTimeout(client, "command -v wget || which wget", 2*time.Second)
-// 	if err == nil {
-// 		return "wget"
-// 	}
-
-// 	return "sftp" // fallback to sftp method
-// }
-
-// func (fs *SFTPS) runSession(cmd string, timeout time.Duration) error {
-// 	session, err := fs.sshClient.NewSession()
-// 	if err != nil {
-// 		return fmt.Errorf("failed to open session: %w", err)
-// 	}
-
-// 	errCh := make(chan error, 1)
-// 	go func() {
-// 		errCh <- session.Run(cmd)
-// 	}()
-
-// 	select {
-// 	case <-time.After(timeout):
-
-// 		session.Close()
-// 		return fmt.Errorf("command timed out and session was closed")
-// 	case err := <-errCh:
-// 		session.Close()
-// 		return err
-// 	}
-// }
-
-// func runWithTimeout(session *ssh.Session, command string, timeout time.Duration) error {
-// 	// Create a channel to listen for command completion
-// 	errCh := make(chan error, 1)
-
-// 	// Run the command in a separate goroutine
-// 	go func() {
-// 		errCh <- session.Run(command)
-// 	}()
-
-// 	// Run against a timer
-// 	select {
-// 	case <-time.After(timeout):
-
-// 		// Timeout occurred, attempt to kill the session
-// 		_ = session.Signal(ssh.SIGKILL) // Best effort to kill the session
-// 		session.Close()
-// 		return fmt.Errorf("command timed out and session was closed")
-// 	case err := <-errCh:
-// 		// Command completed before timeout
-// 		return err
-// 	}
-// }
-
-// func runCmdWithTimeout(client *ssh.Client, cmd string, timeout time.Duration) (string, error) {
-// 	tui.Logger.Debug("running command")
-
-// 	// Timeout wrapper for session creation
-// 	type sessionResult struct {
-// 		session *ssh.Session
-// 		err     error
-// 	}
-// 	sessionCh := make(chan sessionResult, 1)
-
-// 	go func() {
-// 		s, err := client.NewSession()
-// 		sessionCh <- sessionResult{session: s, err: err}
-// 	}()
-
-// 	var session *ssh.Session
-// 	select {
-// 	case <-time.After(timeout):
-// 		return "", fmt.Errorf("timed out waiting for server to create SSH session")
-// 	case res := <-sessionCh:
-// 		if res.err != nil {
-// 			return "", fmt.Errorf("failed to create SSH session: %w", res.err)
-// 		}
-// 		session = res.session
-// 	}
-
-// 	tui.Logger.Debug("session created")
-
-// 	defer session.Close()
-
-// 	var stdoutBuf bytes.Buffer
-// 	session.Stdout = &stdoutBuf
-
-// 	// Timeout wrapper for command execution
-// 	done := make(chan error, 1)
-// 	go func() {
-// 		tui.Logger.Debug("starting command execution", "cmd", cmd)
-// 		done <- session.Run(cmd)
-// 	}()
-
-// 	select {
-// 	case <-time.After(timeout):
-// 		tui.Logger.Warn("Command timed out, attempting to close session", "cmd", cmd)
-// 		session.Close()
-// 		<-done // Ensure goroutine exits
-// 		return "", fmt.Errorf("command timed out and session was closed")
-// 	case err := <-done:
-// 		tui.Logger.Debug("command execution completed", "cmd", cmd, "output", stdoutBuf.String(), "error", err)
-// 		session.Close()
-// 		if err != nil {
-// 			return "", fmt.Errorf("command execution failed: %w", err)
-// 		}
-// 		return stdoutBuf.String(), nil
-// 	}
-
-// }

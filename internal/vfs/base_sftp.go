@@ -6,18 +6,20 @@ import (
 	"strings"
 
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 // Shared base struct for SSH & SFTP implementations as we use SFTP for filesystem operations.
 
 type sftpBase struct {
 	sftpClient *sftp.Client
+	sshClient  *ssh.Client
 	BaseDir    string
 }
 
-func (fs *SFTPFS) ListMods() ([]string, error) {
+func (base *sftpBase) ListMods() ([]string, error) {
 	var mods []string
-	entries, err := fs.sftpClient.ReadDir(fs.BaseDir)
+	entries, err := base.sftpClient.ReadDir(base.BaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -31,9 +33,9 @@ func (fs *SFTPFS) ListMods() ([]string, error) {
 	return mods, nil
 }
 
-func (fs *SFTPFS) WriteMod(filename string, data io.Reader) error {
-	path := filepath.ToSlash(filepath.Join(fs.BaseDir, filename))
-	file, err := fs.sftpClient.Create(path)
+func (base *sftpBase) WriteMod(filename string, data io.Reader) error {
+	path := filepath.ToSlash(filepath.Join(base.BaseDir, filename))
+	file, err := base.sftpClient.Create(path)
 	if err != nil {
 		return err
 	}
@@ -43,19 +45,19 @@ func (fs *SFTPFS) WriteMod(filename string, data io.Reader) error {
 	return err
 }
 
-func (fs *SFTPFS) DeleteMod(filename string) error {
-	path := filepath.ToSlash(filepath.Join(fs.BaseDir, filename))
-	return fs.sftpClient.Remove(path)
+func (base *sftpBase) DeleteMod(filename string) error {
+	path := filepath.ToSlash(filepath.Join(base.BaseDir, filename))
+	return base.sftpClient.Remove(path)
 }
 
-func (fs *SFTPFS) Rename(oldName, newName string) error {
-	oldPath := filepath.ToSlash(filepath.Join(fs.BaseDir, oldName))
-	newPath := filepath.ToSlash(filepath.Join(fs.BaseDir, newName))
-	return fs.sftpClient.Rename(oldPath, newPath)
+func (base *sftpBase) Rename(oldName, newName string) error {
+	oldPath := filepath.ToSlash(filepath.Join(base.BaseDir, oldName))
+	newPath := filepath.ToSlash(filepath.Join(base.BaseDir, newName))
+	return base.sftpClient.Rename(oldPath, newPath)
 }
 
 // Close the SFTP and SSH connections when done
-func (fs *SFTPFS) Close() error {
-	fs.sftpClient.Close()
-	return fs.sshClient.Close()
+func (base *sftpBase) Close() error {
+	base.sftpClient.Close()
+	return base.sshClient.Close()
 }

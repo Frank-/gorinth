@@ -8,9 +8,11 @@ import (
 	"github.com/Frank-/gorinth/internal/modrinth"
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
+	"github.com/spf13/afero"
 )
 
 type GorinthState struct {
+	BaseFS              afero.Fs
 	RemoteFS            vfs.FileSystem
 	WorkingFS           vfs.FileSystem
 	StagingDir          string
@@ -22,8 +24,9 @@ type GorinthState struct {
 	Client              *modrinth.Client
 }
 
-func FetchGorinthState() (*GorinthState, error) {
+func FetchGorinthState(baseFS afero.Fs) (*GorinthState, error) {
 	state := &GorinthState{
+		BaseFS:              baseFS,
 		FilenameMapReversed: make(map[string]string),
 	}
 
@@ -58,12 +61,12 @@ func FetchGorinthState() (*GorinthState, error) {
 	return state, nil
 }
 
-func getFS() (vfs.FileSystem, error) {
+func (state *GorinthState) getFS() (vfs.FileSystem, error) {
 	var fs vfs.FileSystem
 	var err error
 	switch AppConfig.Mode {
 	case "local":
-		fs, err = vfs.NewLocalFS(AppConfig.ModsDir)
+		fs, err = vfs.NewLocalFS(AppConfig.ModsDir, state.BaseFS)
 	case "sftp":
 		fs, err = vfs.NewSFTPFS(AppConfig.Host, AppConfig.Port, AppConfig.User, AppConfig.Password, AppConfig.ModsDir)
 	default:
@@ -77,7 +80,7 @@ func (state *GorinthState) connectFS() error {
 	spinner, _ := tui.StartSpinner(fmt.Sprintf("Connecting to %s...", AppConfig.Mode))
 
 	var err error
-	state.RemoteFS, err = getFS()
+	state.RemoteFS, err = state.getFS()
 
 	if err != nil {
 		spinner.Fail("Failed to connect")
@@ -117,7 +120,7 @@ func (state *GorinthState) setupWorkingFS() error {
 	}
 
 	// Set WorkingFS to a new LocalFS pointing to the staging directory
-	state.WorkingFS, err = vfs.NewLocalFS(tmpDir)
+	state.WorkingFS, err = vfs.NewLocalFS(tmpDir, state.BaseFS)
 	if err != nil {
 		spinner.Fail("Failed to initialize staging file system")
 		return fmt.Errorf("failed to initialize staging file system: %w", err)

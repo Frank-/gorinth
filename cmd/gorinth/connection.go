@@ -6,13 +6,14 @@ import (
 	"github.com/Frank-/gorinth/internal/tui"
 	"github.com/Frank-/gorinth/internal/vfs"
 	"github.com/pkg/sftp"
+	"github.com/spf13/afero"
 	"golang.org/x/crypto/ssh"
 )
 
-func connectAndMount() (vfs.FileSystem, error) {
+func connectAndMount(baseFS afero.Fs) (vfs.FileSystem, error) {
 	if AppConfig.Mode == "local" {
 		tui.Logger.Info("Operating in local mode, using local filesystem")
-		return vfs.NewLocalFS(AppConfig.ModsDir)
+		return vfs.NewLocalFS(AppConfig.ModsDir, baseFS)
 	}
 
 	config := &ssh.ClientConfig{

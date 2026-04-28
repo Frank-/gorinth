@@ -13,34 +13,69 @@ import (
 
 type SSHFS struct {
 	sftpBase
-	BaseDir    string
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
 }
 
 func NewSSHFS(sshClient *ssh.Client, sftpClient *sftp.Client, dir string) (*SSHFS, error) {
 	return &SSHFS{
-		BaseDir:    dir,
-		sshClient:  sshClient,
-		sftpClient: sftpClient,
+		sftpBase: sftpBase{
+			BaseDir:    dir,
+			sftpClient: sftpClient,
+			sshClient:  sshClient,
+		},
 	}, nil
+}
+
+// Use remote shell commands to compute hash on the server, avodiing streaming the file over SFTP just to compute the hash.
+func (fs *SSHFS) HashMod(filename string) (string, error) {
+	path := filepath.ToSlash(filepath.Join(fs.BaseDir, filename))
+	// TODO: Decide if we should check for the command
+	output, err := fs.runSafeCmd(10*time.Second, "sha1sum", path)
+	if err != nil {
+		return "", fmt.Errorf("failed to compute hash on server: %w", err)
+	}
+
+	parts := strings.Fields(string(output))
+	if len(parts) == 0 {
+		return "", fmt.Errorf("unexpected output from sha1sum: %s", output)
+	}
+	return parts[0], nil
+}
+
+func (fs *SSHFS) HashMods() (map[string]string, error) {
+	hashes := make(map[string]string)
+
+	mods, err := fs.ListMods()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list mods: %w", err)
+	}
+
+	for _, mod := range mods {
+		hash, err := fs.HashMod(mod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash mod %s: %w", mod, err)
+		}
+		hashes[mod] = hash
+	}
+
+	return hashes, nil
 }
 
 func (fs *SSHFS) DownloadMod(url string, filename string) error {
 	downloadMethod := fs.determineDownloadMethod(fs.sshClient)
 	// Attempt serverside download
-	if downloadMethod == "curl" {
+	switch downloadMethod {
+	case "curl":
 		_, err := fs.runSafeCmd(30*time.Second, "curl", "-L", "-o", filename, url)
 		if err != nil {
 			return fmt.Errorf("failed to download mod with curl: %w", err)
 		}
 
-	} else if downloadMethod == "wget" {
+	case "wget":
 		_, err := fs.runSafeCmd(30*time.Second, "wget", "-O", filename, url)
 		if err != nil {
 			return fmt.Errorf("failed to download mod with wget: %w", err)
 		}
-	} else {
+	default:
 		// Some kind of error
 		return fmt.Errorf("no download tool available on server (curl or wget), cannot download mod")
 	}
